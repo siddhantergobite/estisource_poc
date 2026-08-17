@@ -1,0 +1,13 @@
+README.md
+pyproject.toml
+cad_engine/__init__.py
+cad_engine/occt_engine.py
+open_cad_engine.egg-info/PKG-INFO
+open_cad_engine.egg-info/SOURCES.txt
+open_cad_engine.egg-info/dependency_links.txt
+open_cad_engine.egg-info/requires.txt
+open_cad_engine.egg-info/top_level.txt
+server/__init__.py
+server/main.py
+tests/test_api.py
+tests/test_occt_engine.py

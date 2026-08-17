@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open-cad-engine"
+version = "0.1.0"
+description = "Open-source STEP/IGES 3D CAD inspection and parametric editing PoC built on Open CASCADE."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "cadquery-ocp>=7.9.3.1.1",
+    "fastapi>=0.115",
+    "python-multipart>=0.0.20",
+    "uvicorn[standard]>=0.34",
+]
+
+[dependency-groups]
+dev = [
+    "httpx2>=0.1",
+    "pytest>=8.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.setuptools.packages.find]
+include = ["cad_engine*", "server*"]
