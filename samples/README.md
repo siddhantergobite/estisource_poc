@@ -22,4 +22,9 @@ The IGES samples came from the [Afanche sample page](https://www.afanche.com/sam
 
 The additional complex files came from [SampleFile IGES fixtures](https://samplefile.com/samples/three-d/iges/), the [Industrial Inspection & Analysis NURBS samples](https://industrial-ia.com/resources/nurbs/), and the [NASA Common Research Model](https://commonresearchmodel.larc.nasa.gov/geometry/original-cad-files/).
 
+The controlled parametric hammer fixtures are generated locally by
+`uv run python tools/generate_parametric_hammer_samples.py`. Keep the generated
+filename `ParametricHammer.step` or `ParametricHammer.iges` unchanged when
+uploading; that activates the L1/L2/L3 test profile.
+
 Two tiny STEP exchange fixtures from SampleFile.com are also in this folder, but they did not contain transferable geometry when tested with OCCT. Use the NIST STEP files first.

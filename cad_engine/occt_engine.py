@@ -14,26 +14,51 @@ from OCP.BRep import BRep_Tool
 from OCP.BRepAdaptor import BRepAdaptor_Surface
 from OCP.BRepCheck import BRepCheck_Analyzer
 from OCP.BRepBuilderAPI import BRepBuilderAPI_GTransform
+from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCP.BRepMesh import BRepMesh_IncrementalMesh
 from OCP.BRepBndLib import BRepBndLib
 from OCP.Bnd import Bnd_Box
+from OCP.BRep import BRep_Builder
+from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
 from OCP.GeomAbs import GeomAbs_SurfaceType
 from OCP.IGESControl import IGESControl_Reader, IGESControl_Writer
 from OCP.STEPCAFControl import STEPCAFControl_Reader
 from OCP.STEPControl import STEPControl_AsIs, STEPControl_Reader, STEPControl_Writer
 from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_REVERSED, TopAbs_SOLID, TopAbs_VERTEX
 from OCP.TopExp import TopExp_Explorer
-from OCP.TopoDS import TopoDS
+from OCP.TopoDS import TopoDS, TopoDS_Compound
 from OCP.TopLoc import TopLoc_Location
 from OCP.TCollection import TCollection_ExtendedString
 from OCP.TDocStd import TDocStd_Document
 from OCP.TDF import TDF_LabelSequence
+from OCP.TColStd import TColStd_SequenceOfAsciiString
 from OCP.XCAFDoc import XCAFDoc_Dimension, XCAFDoc_DocumentTool
-from OCP.gp import gp_GTrsf, gp_Mat, gp_XYZ
+from OCP.gp import gp_Ax1, gp_Ax2, gp_Dir, gp_GTrsf, gp_Mat, gp_Pnt, gp_Trsf, gp_XYZ
 
 
 SUPPORTED_FORMATS = {"step", "stp", "iges", "igs"}
 _OCCT_NATIVE_OUTPUT_LOCK = Lock()
+
+_UNIT_ALIASES = {
+    "MM": ("millimetre", "mm"),
+    "MILLIMETRE": ("millimetre", "mm"),
+    "MILLIMETER": ("millimetre", "mm"),
+    "CM": ("centimetre", "cm"),
+    "CENTIMETRE": ("centimetre", "cm"),
+    "CENTIMETER": ("centimetre", "cm"),
+    "M": ("metre", "m"),
+    "METRE": ("metre", "m"),
+    "METER": ("metre", "m"),
+    "IN": ("inch", "in"),
+    "INCH": ("inch", "in"),
+    "FT": ("foot", "ft"),
+    "FOOT": ("foot", "ft"),
+    "UM": ("micrometre", "µm"),
+    "MICROMETRE": ("micrometre", "µm"),
+    "MICROMETER": ("micrometre", "µm"),
+    "MIL": ("thousandth of an inch", "mil"),
+    "MILS": ("thousandth of an inch", "mil"),
+}
 
 
 @contextmanager
@@ -112,6 +137,58 @@ def load_shape(data: bytes, source_format: str):
         temporary_path = Path(temporary.name)
     try:
         return _shape_from_file(temporary_path, normalized)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+def _unit_metadata(name: str | None) -> dict[str, str | bool]:
+    normalized = (name or "").strip().upper()
+    display_name, symbol = _UNIT_ALIASES.get(normalized, ("model units", "u"))
+    return {
+        "name": display_name,
+        "symbol": symbol,
+        "source": "CAD file metadata" if normalized in _UNIT_ALIASES else "not declared by CAD file",
+        "known": normalized in _UNIT_ALIASES,
+    }
+
+
+def _read_unit_name(path: Path, source_format: str) -> str | None:
+    if source_format in {"step", "stp"}:
+        reader = STEPControl_Reader()
+        with _quiet_native_stdout():
+            status = reader.ReadFile(str(path))
+        if status != 1:
+            return None
+        lengths = TColStd_SequenceOfAsciiString()
+        angles = TColStd_SequenceOfAsciiString()
+        solid_angles = TColStd_SequenceOfAsciiString()
+        reader.FileUnits(lengths, angles, solid_angles)
+        if lengths.Length() > 0:
+            return lengths.Value(1).ToCString()
+        return None
+
+    reader = IGESControl_Reader()
+    with _quiet_native_stdout():
+        status = reader.ReadFile(str(path))
+    if status != 1:
+        return None
+    return reader.IGESModel().GlobalSection().UnitName().ToCString()
+
+
+def detect_model_units(data: bytes, source_format: str) -> dict[str, str | bool]:
+    """Read the declared linear unit without changing the imported geometry."""
+
+    if not data:
+        return _unit_metadata(None)
+    normalized = source_format.lower().lstrip(".")
+    suffix = ".step" if normalized in {"step", "stp"} else ".iges"
+    with NamedTemporaryFile(suffix=suffix, delete=False) as temporary:
+        temporary.write(data)
+        temporary_path = Path(temporary.name)
+    try:
+        return _unit_metadata(_read_unit_name(temporary_path, normalized))
+    except Exception:  # Unit metadata is optional in neutral CAD files.
+        return _unit_metadata(None)
     finally:
         temporary_path.unlink(missing_ok=True)
 
@@ -379,3 +456,62 @@ def apply_freeform_parameters(shape, current: dict[str, float], target: dict[str
         gp_XYZ(center_x - transformed_center_x, center_y - transformed_center_y, center_z - transformed_center_z)
     )
     return BRepBuilderAPI_GTransform(shape, transform, True).Shape()
+
+
+def make_parametric_hammer_shape(values: dict[str, float]):
+    """Build the controlled hammer test profile from its named parameters.
+
+    This recipe is intentionally limited to the generated ParametricHammer
+    fixture. It is not applied to arbitrary uploaded customer geometry.
+    """
+
+    l1 = float(values["L1"])
+    l2 = float(values["L2"])
+    l3 = l1 - l2
+    handle_diameter = float(values["HandleDiameter"])
+    head_width = float(values["HeadWidth"])
+    head_height = float(values["HeadHeight"])
+    head_thickness = float(values["HeadThickness"])
+    claw_angle = float(values["ClawAngle"])
+    if min(l1, l2, l3, handle_diameter, head_width, head_height, head_thickness) <= 0:
+        raise ValueError("Hammer dimensions must be greater than zero.")
+
+    axis = gp_Dir(1, 0, 0)
+    handle_start = head_width * 0.42
+    radius = handle_diameter / 2.0
+    first = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(handle_start, 0, 0), axis), radius * 1.08, l2).Shape()
+    second = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(handle_start + l2, 0, 0), axis), radius, l3).Shape()
+    head = BRepPrimAPI_MakeBox(
+        gp_Pnt(-head_width * 0.58, -head_thickness / 2.0, -head_height / 2.0),
+        head_width,
+        head_thickness,
+        head_height,
+    ).Shape()
+    striking_face = BRepPrimAPI_MakeBox(
+        gp_Pnt(-head_width * 0.8, -head_thickness * 0.59, -head_height * 0.36),
+        head_width * 0.22,
+        head_thickness * 1.18,
+        head_height * 0.72,
+    ).Shape()
+    claw_length = head_width * 0.58
+    claw = BRepPrimAPI_MakeBox(
+        gp_Pnt(head_width * 0.33, -head_thickness * 0.36, head_height * 0.18),
+        claw_length,
+        head_thickness * 0.72,
+        head_height * 0.34,
+    ).Shape()
+    rotation = gp_Trsf()
+    rotation.SetRotation(gp_Ax1(gp_Pnt(head_width * 0.33, 0, head_height * 0.18), gp_Dir(0, 1, 0)), radians(-claw_angle))
+    claw = BRepBuilderAPI_Transform(claw, rotation, True).Shape()
+    butt = BRepPrimAPI_MakeCylinder(
+        gp_Ax2(gp_Pnt(handle_start + l1, 0, 0), axis),
+        radius * 1.22,
+        max(handle_diameter * 0.7, 8),
+    ).Shape()
+
+    compound = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(compound)
+    for part in (head, striking_face, claw, first, second, butt):
+        builder.Add(compound, part)
+    return compound

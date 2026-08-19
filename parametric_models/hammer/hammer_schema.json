@@ -1,0 +1,78 @@
+{
+  "model_id": "parametric_hammer",
+  "master_format": "FreeCAD FCStd",
+  "neutral_exports": ["STEP", "IGES"],
+  "parameters": [
+    {
+      "key": "L1",
+      "label": "Total handle length",
+      "unit": "mm",
+      "editable": true,
+      "default": 300.0,
+      "source": "Parameters.L1"
+    },
+    {
+      "key": "L2",
+      "label": "Head-side handle section",
+      "unit": "mm",
+      "editable": true,
+      "default": 80.0,
+      "source": "Parameters.L2"
+    },
+    {
+      "key": "L3",
+      "label": "Remaining handle section",
+      "unit": "mm",
+      "editable": false,
+      "default": 220.0,
+      "formula": "L1 - L2",
+      "source": "Parameters.L3"
+    },
+    {
+      "key": "HandleDiameter",
+      "label": "Handle diameter",
+      "unit": "mm",
+      "editable": true,
+      "default": 32.0,
+      "source": "Parameters.HandleDiameter"
+    },
+    {
+      "key": "HeadWidth",
+      "label": "Head width",
+      "unit": "mm",
+      "editable": true,
+      "default": 120.0,
+      "source": "Parameters.HeadWidth"
+    },
+    {
+      "key": "HeadHeight",
+      "label": "Head height",
+      "unit": "mm",
+      "editable": true,
+      "default": 60.0,
+      "source": "Parameters.HeadHeight"
+    },
+    {
+      "key": "HeadThickness",
+      "label": "Head thickness",
+      "unit": "mm",
+      "editable": true,
+      "default": 42.0,
+      "source": "Parameters.HeadThickness"
+    },
+    {
+      "key": "ClawAngle",
+      "label": "Claw angle",
+      "unit": "deg",
+      "editable": true,
+      "default": 25.0,
+      "source": "Parameters.ClawAngle"
+    }
+  ],
+  "constraints": [
+    "L1 > L2",
+    "L3 = L1 - L2",
+    "L1 > 0",
+    "L2 > 0"
+  ]
+}

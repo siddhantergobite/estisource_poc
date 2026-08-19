@@ -156,17 +156,22 @@ function ParameterPanel({ analysis, parameterValues, isBusy, onSubmit, onChange,
   const editingAvailable = Boolean(analysis?.editing_available);
   const parameters = analysis?.parameters ?? [];
   const isComplex = analysis?.complexity === "complex";
-  const unitLabel = (parameter) => parameter.unit === "deg" ? "°" : "u";
+  const isParametric = analysis?.mode === "parametric";
+  const unitLabel = (parameter) => parameter.unit === "deg" ? "deg" : parameter.unit ?? analysis?.units?.symbol ?? "u";
+  const hasEditableValues = parameters.filter((parameter) => parameter.editable).every((parameter) => {
+    const value = Number(parameterValues[parameter.key]);
+    return parameterValues[parameter.key] !== "" && Number.isFinite(value);
+  });
 
   return <section className="side-section">
-    <div className="section-heading"><div className="section-eyebrow">{editingAvailable ? isComplex ? "Editable overall dimensions" : "Editable parameters" : "Detected measurements"}</div><Ruler size={15} /></div>
+    <div className="section-heading"><div className="section-eyebrow">{isParametric ? "Parametric hammer dimensions" : editingAvailable ? isComplex ? "Editable overall dimensions" : "Editable parameters" : "Detected measurements"}</div><Ruler size={15} /></div>
     {editingAvailable ? <form onSubmit={onSubmit} className="parameter-form">
       {parameters.map((parameter) => <div key={parameter.key}>
         <label htmlFor={`parameter-${parameter.key}`}>{parameter.label}<span>{parameter.unit}</span></label>
-        <div className="input-wrap"><input id={`parameter-${parameter.key}`} type="number" min={parameter.key === "angle" ? undefined : "0.000001"} step="any" value={parameterValues[parameter.key] ?? ""} onChange={(event) => onChange(parameter.key, event.target.value)} disabled={isBusy} placeholder="Upload a model" /><span>{unitLabel(parameter)}</span></div>
+        <div className="input-wrap"><input id={`parameter-${parameter.key}`} type="number" min={parameter.key === "angle" ? undefined : "0.000001"} step="any" value={parameterValues[parameter.key] ?? ""} onChange={(event) => onChange(parameter.key, event.target.value)} disabled={isBusy} readOnly={!parameter.editable} placeholder="Upload a model" /><span>{unitLabel(parameter)}</span></div>
       </div>)}
-      <p>{isComplex ? "These controls scale and rotate the complete imported model. Named feature parameters require a designer-defined schema. The original uploaded file remains unchanged." : "These controls are generated for this simple model. The original uploaded file remains unchanged."}</p>
-      <button className="button primary full" type="submit" disabled={!analysis || isBusy || !parameterValues.length || !parameterValues.breadth || !parameterValues.height}><Check size={16} /> {isBusy ? "Rebuilding model..." : "Update 3D model"}</button>
+      <p>{isParametric ? "L3 is calculated as L1 - L2. L1 must be greater than L2; the original master file remains unchanged." : isComplex ? "These controls scale and rotate the complete imported model. Named feature parameters require a designer-defined schema. The original uploaded file remains unchanged." : "These controls are generated for this simple model. The original uploaded file remains unchanged."}</p>
+      <button className="button primary full" type="submit" disabled={!analysis || isBusy || !hasEditableValues}><Check size={16} /> {isBusy ? "Rebuilding model..." : "Update 3D model"}</button>
     </form> : analysis ? <div className="measurement-panel">
       <div className="complex-badge">Complex model · measurement only</div>
       <div className="detected-parameter-list">{parameters.map((parameter) => <div key={parameter.key}>
@@ -206,7 +211,7 @@ function PmiDimensions({ analysis }) {
     <div className="section-heading"><div className="section-eyebrow">AP242 PMI dimensions</div><Ruler size={15} /></div>
     <div className="pmi-list">{analysis.pmi_dimensions.map((dimension) => <div className="pmi-row" key={dimension.key}>
       <label htmlFor={`pmi-${dimension.key}`}>{dimension.label}<span>{dimension.type}</span></label>
-      <div className="input-wrap"><input id={`pmi-${dimension.key}`} type="text" value={formatNumber(dimension.value, 6)} readOnly disabled /><span>{dimension.unit === "deg" ? "deg" : "u"}</span></div>
+      <div className="input-wrap"><input id={`pmi-${dimension.key}`} type="text" value={formatNumber(dimension.value, 6)} readOnly disabled /><span>{dimension.unit === "deg" ? "deg" : dimension.unit}</span></div>
       <em>{formatTolerance(dimension)} · Source PMI · read-only</em>
     </div>)}</div>
     <p className="feature-note">These values are read from the STEP AP242 semantic PMI carried by the uploaded file. A PMI value becomes editable only when a model-specific rebuild operation is mapped to the geometry; changing arbitrary B-Rep faces would not be production-safe.</p>
@@ -232,7 +237,11 @@ function App() {
   }
 
   function syncParameters(payload) {
-    setParameterValues({ length: inputValue(payload.length, 6), breadth: inputValue(payload.breadth, 6), height: inputValue(payload.height, 6), angle: inputValue(payload.angle ?? 0, 1) });
+    const nextValues = {};
+    (payload.parameters ?? []).forEach((parameter) => {
+      nextValues[parameter.key] = inputValue(parameter.value, parameter.unit === "deg" ? 1 : 6);
+    });
+    setParameterValues(nextValues);
   }
 
   async function uploadFile(file) {
@@ -280,7 +289,7 @@ function App() {
 
   async function applyParameters(event) {
     event.preventDefault();
-    if (!documentId || !parameterValues.length || !parameterValues.breadth || !parameterValues.height) return;
+    if (!documentId || !analysis) return;
     setIsBusy(true);
     setError("");
     setNotice("");
@@ -288,12 +297,14 @@ function App() {
       const payload = await readResponse(await fetch(`${API_BASE}/api/documents/${documentId}/parameters`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          length: Number(parameterValues.length),
-          breadth: Number(parameterValues.breadth),
-          height: Number(parameterValues.height),
-          angle: Number(parameterValues.angle || 0),
-        }),
+        body: JSON.stringify(analysis.mode === "parametric"
+          ? { values: Object.fromEntries(analysis.parameters.filter((parameter) => parameter.editable).map((parameter) => [parameter.key, Number(parameterValues[parameter.key])])) }
+          : {
+            length: Number(parameterValues.length),
+            breadth: Number(parameterValues.breadth),
+            height: Number(parameterValues.height),
+            angle: Number(parameterValues.angle || 0),
+          }),
       }));
       setAnalysis(payload);
       syncParameters(payload);
@@ -364,7 +375,7 @@ function App() {
 
         <section className="side-section">
           <div className="section-heading"><div className="section-eyebrow">Editing mode</div><Layers3 size={15} /></div>
-          <div className="mode-card"><strong>{analysis?.editing_available ? "Free-form" : analysis ? "Measurement-only" : "Waiting for model"}</strong><span>{analysis?.complexity_reason ?? "The available controls will be based on the uploaded model."}</span><em>{analysis?.editing_available ? analysis.complexity === "complex" ? "Whole-model editing is active; named feature schemas are the next layer" : "Named parametric schemas are the next layer" : analysis ? "Configure named parameters for this model to enable editing" : "Upload STEP or IGES to begin"}</em></div>
+          <div className="mode-card"><strong>{analysis?.mode === "parametric" ? "Parametric" : analysis?.editing_available ? "Free-form" : analysis ? "Measurement-only" : "Waiting for model"}</strong><span>{analysis?.complexity_reason ?? "The available controls will be based on the uploaded model."}</span><em>{analysis?.mode === "parametric" ? "Constraints active: L3 = L1 - L2" : analysis?.editing_available ? analysis.complexity === "complex" ? "Whole-model editing is active; named feature schemas are the next layer" : "Named parametric schemas are the next layer" : analysis ? "Configure named parameters for this model to enable editing" : "Upload STEP or IGES to begin"}</em></div>
         </section>
         <div className="sidebar-footer"><span>Open-source 3D PoC</span><span>v0.2.0</span></div>
       </aside>
@@ -372,11 +383,11 @@ function App() {
       <section className="main-panel">
         <div className="content-heading"><div><div className="section-eyebrow">Workspace / {analysis ? "3D model review" : "Getting started"}</div><h1>{analysis ? fileMeta?.name : "Build from a real 3D model"}</h1><p>{analysis ? "Inspect the imported solid, orbit the view, and edit its dimensions." : "An open-source STEP / IGES foundation for interactive CAD editing."}</p></div><div className="heading-actions">{notice && <span className="notice"><Check size={14} /> {notice}</span>}{error && <span className="error-message">{error}</span>}{analysis && <button className="button primary" onClick={() => setIsExportOpen(true)}><Download size={16} /> Export</button>}</div></div>
 
-        <div className="stats-grid"><StatCard icon={Box} label="Solids" value={analysis ? formatNumber(analysis.solid_count, 0) : "—"} detail="B-Rep bodies" /><StatCard icon={Layers3} label="Faces" value={analysis ? formatNumber(analysis.face_count, 0) : "—"} detail="topology" /><StatCard icon={Maximize2} label="Length" value={analysis ? `${formatNumber(analysis.length)} u` : "—"} detail="editable axis" /><StatCard icon={Ruler} label="Breadth" value={analysis ? `${formatNumber(analysis.breadth)} u` : "—"} detail="editable axis" /><StatCard icon={Box} label="Height" value={analysis ? `${formatNumber(analysis.height)} u` : "—"} detail="editable axis" /></div>
+        <div className="stats-grid"><StatCard icon={Box} label="Solids" value={analysis ? formatNumber(analysis.solid_count, 0) : "—"} detail="B-Rep bodies" /><StatCard icon={Layers3} label="Faces" value={analysis ? formatNumber(analysis.face_count, 0) : "—"} detail="topology" /><StatCard icon={Maximize2} label="Length" value={analysis ? `${formatNumber(analysis.length)} ${analysis.units?.symbol ?? "u"}` : "—"} detail="editable axis" /><StatCard icon={Ruler} label="Breadth" value={analysis ? `${formatNumber(analysis.breadth)} ${analysis.units?.symbol ?? "u"}` : "—"} detail="editable axis" /><StatCard icon={Box} label="Height" value={analysis ? `${formatNumber(analysis.height)} ${analysis.units?.symbol ?? "u"}` : "—"} detail="editable axis" /></div>
 
         <div className="model-card"><div className="card-toolbar"><div><strong>3D model preview</strong><span>{analysis ? `${formatNumber(analysis.mesh.triangle_count, 0)} triangles · orbit / zoom enabled` : "Waiting for a STEP or IGES model"}</span></div><span className="view-badge">OCCT mesh</span></div><CadViewer mesh={analysis?.mesh} /></div>
 
-        <div className="lower-grid"><section className="data-card"><div className="card-toolbar"><div><strong>Model measurements</strong><span>Values extracted from the OCCT model</span></div></div>{analysis ? <div className="dimension-list">{analysis.parameters.map((parameter) => <div key={parameter.key}><span>{parameter.label}</span><strong>{formatNumber(parameter.value, 6)} <small>{parameter.unit === "deg" ? "deg" : "u"}</small></strong><em className={parameter.editable ? "editable-tag" : "detected-tag"}>{parameter.editable ? "Editable" : "Detected"}</em></div>)}<div><span>Edges / vertices</span><strong>{formatNumber(analysis.edge_count, 0)} / {formatNumber(analysis.vertex_count, 0)}</strong><em className="detected-tag">Detected</em></div></div> : <div className="card-empty">Measurements will populate after upload.</div>}</section><section className="data-card"><div className="card-toolbar"><div><strong>Engine status</strong><span>Current 3D PoC boundaries</span></div></div><div className="engine-notes"><div><Check size={15} /><span>STEP and IGES imported with OCCT</span></div><div><Check size={15} /><span>Original production file is immutable</span></div><div><Check size={15} /><span>Edited geometry exports back to source format</span></div><div><Check size={15} /><span>{analysis?.valid ? "Shape validation passed" : "Upload a model to validate"}</span></div></div></section></div>
+        <div className="lower-grid"><section className="data-card"><div className="card-toolbar"><div><strong>Model measurements</strong><span>Values extracted from the OCCT model · {analysis?.units?.name ?? "unit not declared"}</span></div></div>{analysis ? <div className="dimension-list">{analysis.parameters.map((parameter) => <div key={parameter.key}><span>{parameter.label}</span><strong>{formatNumber(parameter.value, 6)} <small>{parameter.unit === "deg" ? "deg" : parameter.unit}</small></strong><em className={parameter.editable ? "editable-tag" : "detected-tag"}>{parameter.editable ? "Editable" : "Detected"}</em></div>)}<div><span>Edges / vertices</span><strong>{formatNumber(analysis.edge_count, 0)} / {formatNumber(analysis.vertex_count, 0)}</strong><em className="detected-tag">Detected</em></div></div> : <div className="card-empty">Measurements will populate after upload.</div>}</section><section className="data-card"><div className="card-toolbar"><div><strong>Engine status</strong><span>Current 3D PoC boundaries</span></div></div><div className="engine-notes"><div><Check size={15} /><span>STEP and IGES imported with OCCT</span></div><div><Check size={15} /><span>Original production file is immutable</span></div><div><Check size={15} /><span>Edited geometry exports back to source format</span></div><div><Check size={15} /><span>{analysis?.valid ? "Shape validation passed" : "Upload a model to validate"}</span></div></div></section></div>
       </section>
       {isExportOpen && <ExportModal documentId={documentId} sourceFormat={analysis?.source_format} onClose={() => setIsExportOpen(false)} />}
     </main>

@@ -1,0 +1,146 @@
+"""Create a small native FreeCAD parametric hammer test model.
+
+Run this file from FreeCAD's Macro -> Macros dialog or with FreeCADCmd.
+The Spreadsheet object is the source of truth:
+
+    L1 = total handle length
+    L2 = head-side handle section
+    L3 = L1 - L2
+
+The HammerModel object references those named spreadsheet values with
+expressions, so changing L1 or L2 and recomputing updates the shape.
+"""
+
+import FreeCAD as App
+import Part
+
+
+class HammerModel:
+    def __init__(self, obj):
+        self.Type = "ParametricHammer"
+        obj.addProperty("App::PropertyLength", "L1", "Dimensions", "Total handle length")
+        obj.addProperty("App::PropertyLength", "L2", "Dimensions", "Head-side handle section")
+        obj.addProperty("App::PropertyLength", "L3", "Dimensions", "Remaining handle section")
+        obj.addProperty("App::PropertyLength", "HandleDiameter", "Dimensions")
+        obj.addProperty("App::PropertyLength", "HeadWidth", "Dimensions")
+        obj.addProperty("App::PropertyLength", "HeadHeight", "Dimensions")
+        obj.addProperty("App::PropertyLength", "HeadThickness", "Dimensions")
+        obj.addProperty("App::PropertyAngle", "ClawAngle", "Dimensions")
+        obj.addProperty("App::PropertyString", "ParameterSource", "Design intent")
+        obj.ParameterSource = "Parameters spreadsheet: L1, L2, L3 = L1 - L2"
+        obj.Proxy = self
+
+    def execute(self, obj):
+        l1 = float(obj.L1)
+        l2 = float(obj.L2)
+        l3 = float(obj.L3)
+        handle_diameter = float(obj.HandleDiameter)
+        head_width = float(obj.HeadWidth)
+        head_height = float(obj.HeadHeight)
+        head_thickness = float(obj.HeadThickness)
+        claw_angle = float(obj.ClawAngle)
+
+        if l1 <= 0 or l2 <= 0 or l3 <= 0 or l2 >= l1:
+            raise ValueError("L1 must be greater than L2, and L3 must be positive.")
+
+        axis = App.Vector(1, 0, 0)
+        handle_start = head_width * 0.42
+        radius = handle_diameter / 2.0
+        first = Part.makeCylinder(radius * 1.08, l2, App.Vector(handle_start, 0, 0), axis)
+        second = Part.makeCylinder(radius, l3, App.Vector(handle_start + l2, 0, 0), axis)
+
+        head = Part.makeBox(
+            head_width,
+            head_thickness,
+            head_height,
+            App.Vector(-head_width * 0.58, -head_thickness / 2.0, -head_height / 2.0),
+        )
+        striking_face = Part.makeBox(
+            head_width * 0.22,
+            head_thickness * 1.18,
+            head_height * 0.72,
+            App.Vector(-head_width * 0.8, -head_thickness * 0.59, -head_height * 0.36),
+        )
+
+        claw_length = head_width * 0.58
+        claw = Part.makeBox(
+            claw_length,
+            head_thickness * 0.72,
+            head_height * 0.34,
+            App.Vector(head_width * 0.33, -head_thickness * 0.36, head_height * 0.18),
+        )
+        claw.rotate(App.Vector(head_width * 0.33, 0, head_height * 0.18), App.Vector(0, 1, 0), -claw_angle)
+
+        butt = Part.makeCylinder(radius * 1.22, max(handle_diameter * 0.7, 8), App.Vector(handle_start + l1, 0, 0), axis)
+        obj.Shape = Part.makeCompound([head, striking_face, claw, first, second, butt])
+
+
+def make_spreadsheet(doc):
+    sheet = doc.addObject("Spreadsheet::Sheet", "Parameters")
+    rows = [
+        ("A1", "Parameter"),
+        ("B1", "Value"),
+        ("C1", "Meaning"),
+        ("A2", "L1"),
+        ("B2", "300 mm"),
+        ("C2", "Total handle length"),
+        ("A3", "L2"),
+        ("B3", "80 mm"),
+        ("C3", "Head-side handle section"),
+        ("A4", "L3"),
+        ("B4", "=B2-B3"),
+        ("C4", "Remaining handle section"),
+        ("A5", "HandleDiameter"),
+        ("B5", "32 mm"),
+        ("A6", "HeadWidth"),
+        ("B6", "120 mm"),
+        ("A7", "HeadHeight"),
+        ("B7", "60 mm"),
+        ("A8", "HeadThickness"),
+        ("B8", "42 mm"),
+        ("A9", "ClawAngle"),
+        ("B9", "25 deg"),
+    ]
+    for cell, value in rows:
+        sheet.set(cell, value)
+    sheet.setAlias("B2", "L1")
+    sheet.setAlias("B3", "L2")
+    sheet.setAlias("B4", "L3")
+    sheet.setAlias("B5", "HandleDiameter")
+    sheet.setAlias("B6", "HeadWidth")
+    sheet.setAlias("B7", "HeadHeight")
+    sheet.setAlias("B8", "HeadThickness")
+    sheet.setAlias("B9", "ClawAngle")
+    sheet.setStyle("A1:C1", "bold", "add")
+    sheet.setColumnWidth("A", 150)
+    sheet.setColumnWidth("B", 120)
+    sheet.setColumnWidth("C", 260)
+    return sheet
+
+
+def build():
+    doc = App.newDocument("ParametricHammer")
+    sheet = make_spreadsheet(doc)
+    model = doc.addObject("Part::FeaturePython", "HammerModel")
+    HammerModel(model)
+    model.setExpression("L1", "Parameters.L1")
+    model.setExpression("L2", "Parameters.L2")
+    model.setExpression("L3", "Parameters.L3")
+    model.setExpression("HandleDiameter", "Parameters.HandleDiameter")
+    model.setExpression("HeadWidth", "Parameters.HeadWidth")
+    model.setExpression("HeadHeight", "Parameters.HeadHeight")
+    model.setExpression("HeadThickness", "Parameters.HeadThickness")
+    model.setExpression("ClawAngle", "Parameters.ClawAngle")
+    doc.recompute()
+
+    doc.recompute()
+    doc.saveAs("ParametricHammer.FCStd")
+    Part.export([model], "ParametricHammer.step")
+    Part.export([model], "ParametricHammer.iges")
+    print("Created ParametricHammer.FCStd")
+    print("Created ParametricHammer.step and ParametricHammer.iges")
+    print("Edit Parameters spreadsheet cells B2/B3; L3 is calculated as L1 - L2.")
+    return doc
+
+
+build()
