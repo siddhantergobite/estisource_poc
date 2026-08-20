@@ -28,6 +28,7 @@ from cad_engine.occt_engine import (
     detect_model_units,
     load_shape,
     make_parametric_hammer_shape,
+    resolve_preview_face_ids,
 )
 from cad_engine.inventor_adapter import InventorAdapterError, get_inventor_worker
 
@@ -208,6 +209,35 @@ def _is_simple_model(analysis) -> bool:
     return analysis.face_count <= 20 and analysis.edge_count <= 80 and analysis.solid_count <= 1
 
 
+def _resolve_native_preview_bindings(native_parameters: list[dict] | None, shape) -> None:
+    """Attach only conservative feature-to-preview face matches."""
+
+    resolved_features: dict[int, tuple[list[int], float | None]] = {}
+    for parameter in native_parameters or []:
+        preview_face_ids: set[int] = set()
+        for binding in parameter.get("feature_bindings", []):
+            feature_index = binding.get("feature_index")
+            if isinstance(feature_index, int) and feature_index in resolved_features:
+                face_ids, score = resolved_features[feature_index]
+            else:
+                face_ids, score = resolve_preview_face_ids(
+                    shape,
+                    binding.get("face_signatures", []),
+                    binding.get("model_bounds"),
+                    binding.get("feature_bounds"),
+                )
+                if isinstance(feature_index, int):
+                    resolved_features[feature_index] = (face_ids, score)
+            binding["preview_face_ids"] = face_ids
+            if face_ids and score is not None:
+                binding["preview_match_score"] = round(score, 6)
+                preview_face_ids.update(face_ids)
+        parameter["preview_face_ids"] = sorted(preview_face_ids)
+        if preview_face_ids:
+            parameter["mapping_status"] = "preview_mapped"
+            parameter["mapping_description"] = "Feature relationship resolved to the highlighted OCCT preview faces."
+
+
 def _analysis_payload(document: StoredDocument, shape=None, analysis: Cad3DAnalysis | None = None) -> dict:
     shape = shape or _load_document_shape(document)
     analysis = analysis or document.analysis or analyze_shape(shape)
@@ -236,12 +266,19 @@ def _analysis_payload(document: StoredDocument, shape=None, analysis: Cad3DAnaly
         parameters = [
             {
                 "key": parameter["name"],
-                "label": f"Inventor {parameter['name']}",
+                "label": parameter.get("label") or f"Inventor {parameter['name']}",
                 "value": parameter["display_value"],
                 "unit": "deg" if parameter["units"] == "deg" else parameter["units"],
                 "editable": parameter["editable"],
                 "native_parameter": parameter["name"],
                 "expression": parameter["expression"],
+                "feature_bindings": [
+                    {key: value for key, value in binding.items() if key not in {"face_signatures", "feature_bounds", "model_bounds"}}
+                    for binding in parameter.get("feature_bindings", [])
+                ],
+                "mapping_status": parameter.get("mapping_status", "parameter_only"),
+                "mapping_description": parameter.get("mapping_description", ""),
+                "preview_face_ids": parameter.get("preview_face_ids", []),
             }
             for parameter in (document.native_parameters or [])
         ]
@@ -361,6 +398,8 @@ async def upload_document(file: UploadFile = File(...)) -> dict:
     try:
         shape = load_shape(working_bytes, geometry_format)
         analysis = _analyze_preview_shape(shape)
+        if source_format == "inventor":
+            _resolve_native_preview_bindings(native_parameters, shape)
     except Exception as exc:  # noqa: BLE001 - return parser details to the client
         raise HTTPException(status_code=400, detail=f"Could not read the {source_format.upper()} model: {exc}") from exc
     profile = _profile_for_filename(filename)
@@ -405,7 +444,14 @@ def apply_parameters(document_id: str, request: ParameterRequest) -> dict:
         unknown = sorted(set(request.values) - set(native_catalog))
         if unknown:
             raise HTTPException(status_code=400, detail=f"Unknown Inventor parameters: {', '.join(unknown)}")
-        updates: dict[str, float] = {}
+        # Rebuild from the complete last-known editable state. This matters
+        # after a failed Inventor update, because the worker may have had to
+        # discard its session and reopen the immutable source.
+        updates: dict[str, float] = {
+            key: float(parameter["display_value"])
+            for key, parameter in native_catalog.items()
+            if parameter["editable"]
+        }
         for key, value in request.values.items():
             if not native_catalog[key]["editable"]:
                 raise HTTPException(status_code=400, detail=f"Inventor parameter {key} is formula-driven and read-only.")
@@ -420,8 +466,9 @@ def apply_parameters(document_id: str, request: ParameterRequest) -> dict:
             candidate_bytes = native_step_path.read_bytes()
             candidate_shape = load_shape(candidate_bytes, "step")
             candidate_analysis = _analyze_preview_shape(candidate_shape)
+            _resolve_native_preview_bindings(updated_catalog, candidate_shape)
             if (
-                candidate_analysis.solid_count <= 0
+                candidate_analysis.face_count <= 0
                 or candidate_analysis.mesh["triangle_count"] <= 0
                 or not candidate_analysis.mesh["vertices"]
             ):
@@ -429,7 +476,7 @@ def apply_parameters(document_id: str, request: ParameterRequest) -> dict:
                 raise HTTPException(
                     status_code=422,
                     detail=(
-                        "Inventor rebuilt the part, but the exported STEP contains no valid solid. "
+                        "Inventor rebuilt the part, but the exported STEP contains no previewable geometry. "
                         "The previous preview was preserved. Try a smaller value or use Reset to production."
                     ),
                 )
@@ -516,10 +563,14 @@ def reset_document(document_id: str) -> dict:
         native_step_path = NATIVE_WORK_ROOT / f"{document.document_id}_reset.step"
         try:
             worker = get_inventor_worker()
+            # Reopen the immutable source so Reset does not reuse the already
+            # edited Inventor document held by the persistent COM worker.
+            worker.discard_session()
             document.native_parameters = [parameter.to_dict() for parameter in worker.rebuild_to_step(document.native_source_path, native_step_path, {})]
             document.working_bytes = native_step_path.read_bytes()
             shape = load_shape(document.working_bytes, "step")
             analysis = _analyze_preview_shape(shape)
+            _resolve_native_preview_bindings(document.native_parameters, shape)
             document.shape = shape
             document.analysis = analysis
             document.parameter_state = _initial_parameters(shape, analysis)

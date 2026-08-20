@@ -393,8 +393,10 @@ def _mesh_shape(shape, deflection: float = 0.8, max_triangles: int = 120_000) ->
     BRepMesh_IncrementalMesh(shape, deflection, True)
     vertices: list[float] = []
     indices: list[int] = []
+    triangle_face_ids: list[int] = []
     triangle_count = 0
     explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    face_id = 0
     while explorer.More() and triangle_count < max_triangles:
         face = TopoDS.Face_s(explorer.Current())
         location = TopLoc_Location()
@@ -421,9 +423,16 @@ def _mesh_shape(shape, deflection: float = 0.8, max_triangles: int = 120_000) ->
                         vertices.extend((point.X(), point.Y(), point.Z()))
                     triangle_indices.append(vertex_index)
                 indices.extend(triangle_indices)
+                triangle_face_ids.append(face_id)
                 triangle_count += 1
         explorer.Next()
-    return {"vertices": vertices, "indices": indices, "triangle_count": triangle_count}
+        face_id += 1
+    return {
+        "vertices": vertices,
+        "indices": indices,
+        "triangle_count": triangle_count,
+        "triangle_face_ids": triangle_face_ids,
+    }
 
 
 def analyze_shape(shape, include_mesh: bool = True) -> Cad3DAnalysis:
@@ -442,8 +451,107 @@ def analyze_shape(shape, include_mesh: bool = True) -> Cad3DAnalysis:
         edge_count=_count_shapes(shape, TopAbs_EDGE),
         vertex_count=_count_shapes(shape, TopAbs_VERTEX),
         valid=bool(BRepCheck_Analyzer(shape).IsValid()),
-        mesh=_mesh_shape(shape) if include_mesh else {"vertices": [], "indices": [], "triangle_count": 0},
+        mesh=_mesh_shape(shape) if include_mesh else {"vertices": [], "indices": [], "triangle_count": 0, "triangle_face_ids": []},
     )
+
+
+def _normalized_box_signature(values: list[float], overall_min: list[float], scale: float) -> list[float]:
+    return [(value - origin) / scale for value, origin in zip(values, overall_min)]
+
+
+def resolve_preview_face_ids(
+    shape,
+    face_signatures: list[dict],
+    source_model_bounds: dict | None = None,
+    feature_bounds: dict | None = None,
+    tolerance: float = 0.025,
+) -> tuple[list[int], float | None]:
+    """Match Inventor feature-face boxes to OCCT preview face indices.
+
+    Inventor and the STEP translator do not share a face ID namespace. A
+    normalized bounding-box match is therefore used as a conservative bridge.
+    It is accepted only when the best candidate is sufficiently close; callers
+    must keep the binding unresolved when no safe match is found.
+    """
+
+    if not face_signatures and not feature_bounds:
+        return [], None
+    overall_box = Bnd_Box()
+    BRepBndLib.Add_s(shape, overall_box)
+    min_x, min_y, min_z, max_x, max_y, max_z = overall_box.Get()
+    overall_min = [min_x, min_y, min_z]
+    scale = max(max_x - min_x, max_y - min_y, max_z - min_z, 1e-9)
+
+    candidates: list[tuple[int, list[float], list[float]]] = []
+    explorer = TopExp_Explorer(shape, TopAbs_FACE)
+    face_id = 0
+    while explorer.More():
+        face_box = Bnd_Box()
+        BRepBndLib.Add_s(TopoDS.Face_s(explorer.Current()), face_box)
+        face_min_x, face_min_y, face_min_z, face_max_x, face_max_y, face_max_z = face_box.Get()
+        candidates.append(
+            (
+                face_id,
+                _normalized_box_signature([face_min_x, face_min_y, face_min_z], overall_min, scale),
+                _normalized_box_signature([face_max_x, face_max_y, face_max_z], overall_min, scale),
+            )
+        )
+        face_id += 1
+        explorer.Next()
+
+    matches: list[int] = []
+    scores: list[float] = []
+    used: set[int] = set()
+    source_minimum = source_model_bounds.get("min") if isinstance(source_model_bounds, dict) else None
+    source_maximum = source_model_bounds.get("max") if isinstance(source_model_bounds, dict) else None
+    source_scale = None
+    if isinstance(source_minimum, list) and isinstance(source_maximum, list) and len(source_minimum) == 3 and len(source_maximum) == 3:
+        source_scale = max(maximum - minimum for minimum, maximum in zip(source_minimum, source_maximum))
+        source_scale = max(source_scale, 1e-9)
+
+    for signature in face_signatures:
+        source_min = signature.get("min")
+        source_max = signature.get("max")
+        if not isinstance(source_min, list) or not isinstance(source_max, list) or len(source_min) != 3 or len(source_max) != 3:
+            continue
+        # Inventor's database units and the exported STEP units can differ, so
+        # normalize the source against its own overall model box.
+        if source_scale is not None:
+            source_min_normalized = _normalized_box_signature(source_min, source_minimum, source_scale)
+            source_max_normalized = _normalized_box_signature(source_max, source_minimum, source_scale)
+        else:
+            source_min_normalized = source_min
+            source_max_normalized = source_max
+        best: tuple[float, int] | None = None
+        for candidate_id, candidate_min, candidate_max in candidates:
+            if candidate_id in used:
+                continue
+            score = sum(abs(left - right) for left, right in zip(source_min_normalized, candidate_min))
+            score += sum(abs(left - right) for left, right in zip(source_max_normalized, candidate_max))
+            if best is None or score < best[0]:
+                best = (score, candidate_id)
+        if best is not None and best[0] <= tolerance:
+            scores.append(best[0])
+            matches.append(best[1])
+            used.add(best[1])
+    if not matches and isinstance(feature_bounds, dict):
+        feature_min = feature_bounds.get("min")
+        feature_max = feature_bounds.get("max")
+        if isinstance(feature_min, list) and isinstance(feature_max, list) and source_scale is not None:
+            region_min = _normalized_box_signature(feature_min, source_minimum, source_scale)
+            region_max = _normalized_box_signature(feature_max, source_minimum, source_scale)
+            for candidate_id, candidate_min, candidate_max in candidates:
+                overlaps = all(
+                    region_left <= candidate_right and candidate_left <= region_right
+                    for region_left, region_right, candidate_left, candidate_right in zip(region_min, region_max, candidate_min, candidate_max)
+                )
+                if overlaps:
+                    matches.append(candidate_id)
+            if matches:
+                return matches, tolerance
+    if not matches:
+        return [], None
+    return matches, sum(scores) / len(scores)
 
 
 def detect_geometry_features(shape) -> list[dict]:

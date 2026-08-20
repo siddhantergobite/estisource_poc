@@ -32,8 +32,32 @@ function inputValue(value, digits = 3) {
   return Number.isFinite(number) ? Number(number.toFixed(digits)) : "";
 }
 
-function CadViewer({ mesh }) {
+function CadViewer({ mesh, highlightedFaceIds = [], onFaceHover }) {
   const mountRef = useRef(null);
+  const highlightMeshRef = useRef(null);
+  const onFaceHoverRef = useRef(onFaceHover);
+
+  useEffect(() => {
+    onFaceHoverRef.current = onFaceHover;
+  }, [onFaceHover]);
+
+  useEffect(() => {
+    const highlightMesh = highlightMeshRef.current;
+    if (!highlightMesh || !mesh?.indices?.length) return;
+    const highlighted = new Set(highlightedFaceIds);
+    const triangleFaceIds = mesh.triangle_face_ids ?? [];
+    const highlightIndices = [];
+    for (let triangleIndex = 0; triangleIndex < triangleFaceIds.length; triangleIndex += 1) {
+      if (!highlighted.has(triangleFaceIds[triangleIndex])) continue;
+      const offset = triangleIndex * 3;
+      highlightIndices.push(mesh.indices[offset], mesh.indices[offset + 1], mesh.indices[offset + 2]);
+    }
+    highlightMesh.geometry.setAttribute("position", new THREE.Float32BufferAttribute(mesh.vertices, 3));
+    highlightMesh.geometry.setIndex(highlightIndices);
+    highlightMesh.geometry.computeVertexNormals();
+    highlightMesh.geometry.center();
+    highlightMesh.visible = highlightIndices.length > 0;
+  }, [highlightedFaceIds, mesh]);
 
   useEffect(() => {
     const mount = mountRef.current;
@@ -76,11 +100,33 @@ function CadViewer({ mesh }) {
       geometry,
       new THREE.MeshStandardMaterial({ color: "#68bced", roughness: 0.5, metalness: 0.08, side: THREE.DoubleSide }),
     );
+    const highlightMesh = new THREE.Mesh(
+      new THREE.BufferGeometry(),
+      new THREE.MeshBasicMaterial({ color: "#ffd166", transparent: true, opacity: 0.78, side: THREE.DoubleSide, depthWrite: false }),
+    );
+    highlightMesh.visible = false;
+    highlightMeshRef.current = highlightMesh;
     const edges = new THREE.LineSegments(
       new THREE.EdgesGeometry(geometry, 28),
       new THREE.LineBasicMaterial({ color: "#b9eaff", transparent: true, opacity: 0.28 }),
     );
-    scene.add(model, edges);
+    scene.add(model, highlightMesh, edges);
+
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    const handlePointerMove = (event) => {
+      const bounds = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
+      pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      const intersection = raycaster.intersectObject(model, false)[0];
+      const faceIndex = intersection?.faceIndex;
+      const faceId = faceIndex === undefined ? null : (mesh.triangle_face_ids ?? [])[faceIndex] ?? null;
+      onFaceHoverRef.current?.(faceId);
+    };
+    const handlePointerLeave = () => onFaceHoverRef.current?.(null);
+    renderer.domElement.addEventListener("pointermove", handlePointerMove);
+    renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
 
     const gridSize = Math.max(maxSize * 2.6, 100);
     const grid = new THREE.GridHelper(gridSize, 16, "#28617c", "#164661");
@@ -115,10 +161,15 @@ function CadViewer({ mesh }) {
 
     return () => {
       cancelAnimationFrame(frame);
+      renderer.domElement.removeEventListener("pointermove", handlePointerMove);
+      renderer.domElement.removeEventListener("pointerleave", handlePointerLeave);
       observer.disconnect();
       controls.dispose();
       geometry.dispose();
       model.material.dispose();
+      highlightMesh.geometry.dispose();
+      highlightMesh.material.dispose();
+      highlightMeshRef.current = null;
       edges.geometry.dispose();
       edges.material.dispose();
       renderer.dispose();
@@ -152,7 +203,7 @@ function ExportModal({ documentId, sourceFormat, nativeFormat, onClose }) {
   </div>;
 }
 
-function ParameterPanel({ analysis, parameterValues, isBusy, onSubmit, onChange, onReset }) {
+function ParameterPanel({ analysis, parameterValues, isBusy, onSubmit, onChange, onReset, hoveredParameterKey, onParameterHover }) {
   const editingAvailable = Boolean(analysis?.editing_available);
   const parameters = analysis?.parameters ?? [];
   const isComplex = analysis?.complexity === "complex";
@@ -168,9 +219,10 @@ function ParameterPanel({ analysis, parameterValues, isBusy, onSubmit, onChange,
   return <section className="side-section">
     <div className="section-heading"><div className="section-eyebrow">{isNativeInventor ? "Native Inventor parameters" : isParametric ? "Parametric hammer dimensions" : editingAvailable ? isComplex ? "Editable overall dimensions" : "Editable parameters" : "Detected measurements"}</div><Ruler size={15} /></div>
     {editingAvailable ? <form onSubmit={onSubmit} className="parameter-form">
-      {parameters.map((parameter) => <div key={parameter.key}>
+      {parameters.map((parameter) => <div key={parameter.key} className={`parameter-row ${hoveredParameterKey === parameter.key ? "is-hovered" : ""}`} onMouseEnter={() => onParameterHover?.(parameter.key)} onMouseLeave={() => onParameterHover?.(null)}>
         <label htmlFor={`parameter-${parameter.key}`}>{parameter.label}<span>{parameter.unit}</span></label>
         <div className="input-wrap"><input id={`parameter-${parameter.key}`} type="number" min={isNativeInventor || parameter.key === "angle" ? undefined : "0.000001"} step="any" value={parameterValues[parameter.key] ?? ""} onChange={(event) => onChange(parameter.key, event.target.value)} disabled={isBusy} readOnly={!parameter.editable} placeholder="Upload a model" /><span>{unitLabel(parameter)}</span></div>
+        {isNativeInventor && <small className="parameter-mapping" title={parameter.mapping_description}>{parameter.mapping_status !== "parameter_only" ? parameter.mapping_description : "Feature relationship not detected"}</small>}
       </div>)}
       <p>{isNativeInventor ? "These values are read from the native Inventor parameter table. Changes rebuild the Inventor feature history, export a new STEP, and refresh the OCCT preview; the original .ipt remains unchanged." : isParametric ? "L3 is calculated as L1 - L2. L1 must be greater than L2; the original master file remains unchanged." : isSchemaProfile ? "These schema-driven controls use the named OCCT affine rebuild recipe for this model. AP242 PMI values remain source-only until feature mappings are defined." : isComplex ? "These controls scale and rotate the complete imported model. Named feature parameters require a designer-defined schema. The original uploaded file remains unchanged." : "These controls are generated for this simple model. The original uploaded file remains unchanged."}</p>
       <button className="button primary full" type="submit" disabled={!analysis || isBusy || !hasEditableValues}><Check size={16} /> {isBusy ? "Rebuilding model..." : "Update 3D model"}</button>
@@ -231,6 +283,8 @@ function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [hoveredParameterKey, setHoveredParameterKey] = useState(null);
+  const [hoveredFaceId, setHoveredFaceId] = useState(null);
 
   async function readResponse(response) {
     const payload = await response.json();
@@ -341,7 +395,23 @@ function App() {
     setParameterValues({ length: 0, breadth: 0, height: 0, angle: 0 });
     setError("");
     setNotice("");
+    setHoveredParameterKey(null);
+    setHoveredFaceId(null);
     if (inputRef.current) inputRef.current.value = "";
+  }
+
+  const hoveredParameter = analysis?.parameters?.find((parameter) => parameter.key === hoveredParameterKey);
+  const highlightedFaceIds = hoveredParameter?.preview_face_ids?.length
+    ? hoveredParameter.preview_face_ids
+    : hoveredFaceId === null ? [] : [hoveredFaceId];
+  function handleFaceHover(faceId) {
+    setHoveredFaceId(faceId);
+    if (faceId === null) {
+      setHoveredParameterKey(null);
+      return;
+    }
+    const linkedParameter = analysis?.parameters?.find((parameter) => parameter.preview_face_ids?.includes(faceId));
+    setHoveredParameterKey(linkedParameter?.key ?? null);
   }
 
   return <div className="app-shell">
@@ -361,7 +431,7 @@ function App() {
           {fileMeta && <div className="file-chip"><div className="file-chip-icon">{["ipt", "iam"].includes(fileMeta.name.toLowerCase().split(".").pop()) ? fileMeta.name.toLowerCase().split(".").pop().toUpperCase() : fileMeta.name.toLowerCase().endsWith(".iges") || fileMeta.name.toLowerCase().endsWith(".igs") ? "IGES" : "STEP"}</div><div><strong>{fileMeta.name}</strong><span>{formatBytes(fileMeta.size)} · {["ipt", "iam"].includes(fileMeta.name.toLowerCase().split(".").pop()) ? "Inventor + OCCT" : "OCCT"}</span></div><button aria-label="Remove model" onClick={clearDocument}><X size={14} /></button></div>}
         </section>
 
-        <ParameterPanel analysis={analysis} parameterValues={parameterValues} isBusy={isBusy} onSubmit={applyParameters} onChange={(key, value) => setParameterValues((current) => ({ ...current, [key]: value }))} onReset={resetDocument} />
+        <ParameterPanel analysis={analysis} parameterValues={parameterValues} isBusy={isBusy} onSubmit={applyParameters} onChange={(key, value) => setParameterValues((current) => ({ ...current, [key]: value }))} onReset={resetDocument} hoveredParameterKey={hoveredParameterKey} onParameterHover={setHoveredParameterKey} />
         <DetectedFeatures analysis={analysis} />
         <PmiDimensions analysis={analysis} />
         {false && <section className="side-section">
@@ -387,7 +457,7 @@ function App() {
 
         <div className="stats-grid"><StatCard icon={Box} label="Solids" value={analysis ? formatNumber(analysis.solid_count, 0) : "—"} detail="B-Rep bodies" /><StatCard icon={Layers3} label="Faces" value={analysis ? formatNumber(analysis.face_count, 0) : "—"} detail="topology" /><StatCard icon={Maximize2} label="Length" value={analysis ? `${formatNumber(analysis.length)} ${analysis.units?.symbol ?? "u"}` : "—"} detail="editable axis" /><StatCard icon={Ruler} label="Breadth" value={analysis ? `${formatNumber(analysis.breadth)} ${analysis.units?.symbol ?? "u"}` : "—"} detail="editable axis" /><StatCard icon={Box} label="Height" value={analysis ? `${formatNumber(analysis.height)} ${analysis.units?.symbol ?? "u"}` : "—"} detail="editable axis" /></div>
 
-        <div className="model-card"><div className="card-toolbar"><div><strong>3D model preview</strong><span>{analysis ? `${formatNumber(analysis.mesh.triangle_count, 0)} triangles · orbit / zoom enabled` : "Waiting for a STEP or IGES model"}</span></div><span className="view-badge">OCCT mesh</span></div><CadViewer mesh={analysis?.mesh} /></div>
+        <div className="model-card"><div className="card-toolbar"><div><strong>3D model preview</strong><span>{analysis ? `${formatNumber(analysis.mesh.triangle_count, 0)} triangles · orbit / zoom enabled` : "Waiting for a STEP or IGES model"}</span></div><span className="view-badge">OCCT mesh</span></div><CadViewer mesh={analysis?.mesh} highlightedFaceIds={highlightedFaceIds} onFaceHover={handleFaceHover} /></div>
 
         <div className="lower-grid"><section className="data-card"><div className="card-toolbar"><div><strong>Model measurements</strong><span>Values extracted from the OCCT model · {analysis?.units?.name ?? "unit not declared"}</span></div></div>{analysis ? <div className="dimension-list">{analysis.parameters.map((parameter) => <div key={parameter.key}><span>{parameter.label}</span><strong>{formatNumber(parameter.value, 6)} <small>{parameter.unit === "deg" ? "deg" : parameter.unit}</small></strong><em className={parameter.editable ? "editable-tag" : "detected-tag"}>{parameter.editable ? "Editable" : "Detected"}</em></div>)}<div><span>Edges / vertices</span><strong>{formatNumber(analysis.edge_count, 0)} / {formatNumber(analysis.vertex_count, 0)}</strong><em className="detected-tag">Detected</em></div></div> : <div className="card-empty">Measurements will populate after upload.</div>}</section><section className="data-card"><div className="card-toolbar"><div><strong>Engine status</strong><span>Current 3D PoC boundaries</span></div></div><div className="engine-notes"><div><Check size={15} /><span>STEP and IGES imported with OCCT</span></div><div><Check size={15} /><span>Original production file is immutable</span></div><div><Check size={15} /><span>Edited geometry exports back to source format</span></div><div><Check size={15} /><span>{analysis?.valid ? "Shape validation passed" : "Upload a model to validate"}</span></div></div></section></div>
       </section>

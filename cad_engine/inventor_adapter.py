@@ -7,7 +7,7 @@ working copy so a user's original CAD source is never overwritten.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 from pathlib import Path
 import re
 import shutil
@@ -40,9 +40,23 @@ class InventorParameter:
     units: str
     comment: str
     editable: bool
+    label: str | None = None
+    feature_bindings: list[dict[str, Any]] = field(default_factory=list)
+    mapping_status: str = "unmapped"
+
+    @property
+    def mapping_description(self) -> str:
+        if not self.feature_bindings:
+            return "Inventor model parameter; feature relationship was not detected."
+        names = ", ".join(binding["feature_name"] for binding in self.feature_bindings)
+        return f"Controls {names}. Geometry highlighting is available when a preview face mapping is resolved."
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        record = asdict(self)
+        record["label"] = self.label or self.name
+        record["mapping_description"] = self.mapping_description
+        record["preview_face_ids"] = []
+        return record
 
 
 def _com_error_message(exc: Exception) -> str:
@@ -62,6 +76,218 @@ def _display_value(value: float, units: str) -> float:
     if normalized == "deg":
         return value * 180.0 / pi
     return value
+
+
+def _safe_attr(value: Any, name: str, default: Any = None) -> Any:
+    try:
+        return getattr(value, name)
+    except Exception:  # noqa: BLE001 - Inventor COM properties vary by feature type
+        return default
+
+
+def _safe_name(value: Any, default: str = "") -> str:
+    name = _safe_attr(value, "Name", default)
+    return str(name or default).strip()
+
+
+def _collection_items(collection: Any) -> list[Any]:
+    if collection is None:
+        return []
+    try:
+        count = int(collection.Count)
+    except Exception:  # noqa: BLE001 - optional Inventor collection
+        return []
+    items = []
+    for index in range(1, count + 1):
+        try:
+            items.append(collection.Item(index))
+        except Exception:  # noqa: BLE001 - one unavailable item should not abort extraction
+            continue
+    return items
+
+
+_FEATURE_COLLECTION_TYPES = (
+    ("ExtrudeFeatures", "Extrusion"),
+    ("RevolveFeatures", "Revolution"),
+    ("HoleFeatures", "Hole"),
+    ("FilletFeatures", "Fillet"),
+    ("ChamferFeatures", "Chamfer"),
+    ("ShellFeatures", "Shell"),
+    ("LoftFeatures", "Loft"),
+    ("SweepFeatures", "Sweep"),
+    ("CoilFeatures", "Coil"),
+    ("RibFeatures", "Rib"),
+    ("EmbossFeatures", "Emboss"),
+    ("ThickenFeatures", "Thicken"),
+    ("RectangularPatternFeatures", "Rectangular pattern"),
+    ("CircularPatternFeatures", "Circular pattern"),
+    ("MirrorFeatures", "Mirror"),
+    ("MoveFeatures", "Move"),
+    ("FaceFeatures", "Face feature"),
+)
+
+_FEATURE_PARAMETER_PATHS = {
+    "Extrusion": ("Extent.Distance", "Extent.DistanceTwo", "TaperAngle"),
+    "Revolution": ("AngleExtent.Angle", "AngleExtent.AngleTwo"),
+    "Hole": (
+        "HoleDiameter",
+        "CBoreDiameter",
+        "CBoreDepth",
+        "CSinkDiameter",
+        "CSinkAngle",
+        "SpotFaceDiameter",
+        "SpotFaceDepth",
+        "BottomTipAngle",
+    ),
+    "Fillet": ("ConstantRadiusEdgeSet.Radius", "VariableRadiusEdgeSet.StartRadius", "VariableRadiusEdgeSet.EndRadius"),
+    "Chamfer": ("Definition.Distance", "Definition.DistanceOne", "Definition.DistanceTwo", "Definition.Angle"),
+    "Shell": ("Definition.Thickness",),
+    "Loft": ("StartCondition.Distance", "EndCondition.Distance"),
+    "Sweep": ("TaperAngle",),
+    "Thicken": ("Distance",),
+    "Rectangular pattern": ("RowCount", "ColumnCount", "RowOffset", "ColumnOffset"),
+    "Circular pattern": ("Count", "AngleOffset"),
+}
+
+
+def _safe_path(value: Any, path: str) -> Any:
+    for part in path.split("."):
+        value = _safe_attr(value, part)
+        if value is None:
+            return None
+    return value
+
+
+def _feature_type_map(component_definition: Any) -> dict[str, str]:
+    features = _safe_attr(component_definition, "Features")
+    result: dict[str, str] = {}
+    for collection_name, display_type in _FEATURE_COLLECTION_TYPES:
+        for feature in _collection_items(_safe_attr(features, collection_name)):
+            name = _safe_name(feature)
+            if name:
+                result[name] = display_type
+    return result
+
+
+def _feature_face_count(feature: Any) -> int:
+    faces = _safe_attr(feature, "Faces")
+    if faces is not None:
+        try:
+            return int(faces.Count)
+        except Exception:  # noqa: BLE001
+            pass
+    total = 0
+    for body in _collection_items(_safe_attr(feature, "SurfaceBodies")):
+        total += len(_collection_items(_safe_attr(body, "Faces")))
+    return total
+
+
+def _point_coordinates(point: Any) -> list[float] | None:
+    if point is None:
+        return None
+    try:
+        return [float(point.X), float(point.Y), float(point.Z)]
+    except Exception:  # noqa: BLE001 - optional COM geometry data
+        return None
+
+
+def _range_box_signature(range_box: Any) -> dict[str, list[float]] | None:
+    minimum = _point_coordinates(_safe_attr(range_box, "MinPoint"))
+    maximum = _point_coordinates(_safe_attr(range_box, "MaxPoint"))
+    if minimum is None or maximum is None:
+        return None
+    return {"min": minimum, "max": maximum}
+
+
+def _face_signature(face: Any) -> dict[str, Any] | None:
+    range_box = _safe_attr(face, "RangeBox")
+    box_signature = _range_box_signature(range_box)
+    if box_signature is None:
+        return None
+    evaluator = _safe_attr(face, "Evaluator")
+    area = _safe_attr(evaluator, "Area")
+    try:
+        area = float(area)
+    except (TypeError, ValueError):
+        area = None
+    return {
+        **box_signature,
+        "area": area,
+        "surface_type": str(_safe_attr(face, "SurfaceType", "")),
+    }
+
+
+def _model_bounds(component_definition: Any) -> dict[str, list[float]] | None:
+    range_box = _safe_attr(component_definition, "RangeBox")
+    minimum = _point_coordinates(_safe_attr(range_box, "MinPoint"))
+    maximum = _point_coordinates(_safe_attr(range_box, "MaxPoint"))
+    if minimum is None or maximum is None:
+        return None
+    return {"min": minimum, "max": maximum}
+
+
+def _feature_bindings(document: Any) -> dict[str, list[dict[str, Any]]]:
+    """Associate model parameters with features without guessing geometry IDs.
+
+    Inventor exposes a feature's own Parameters collection and feature output
+    faces. This is a reliable semantic relationship. Mapping those faces to
+    the separately exported OCCT mesh is intentionally a later step because
+    STEP transfer can change topology ordering.
+    """
+
+    component_definition = _safe_attr(document, "ComponentDefinition")
+    features = _safe_attr(component_definition, "Features")
+    if component_definition is None or features is None:
+        return {}
+    type_by_name = _feature_type_map(component_definition)
+    model_bounds = _model_bounds(component_definition)
+    bindings: dict[str, list[dict[str, Any]]] = {}
+    for feature_index, feature in enumerate(_collection_items(features), start=1):
+        feature_name = _safe_name(feature, f"Feature {feature_index}")
+        feature_type = type_by_name.get(feature_name)
+        if not feature_type:
+            feature_type = re.sub(r"\d+$", "", feature_name).strip() or "Inventor feature"
+        feature_faces = _collection_items(_safe_attr(feature, "Faces"))
+        face_signatures = [signature for face in feature_faces if (signature := _face_signature(face)) is not None]
+        face_count = len(feature_faces) or _feature_face_count(feature)
+        feature_bounds = _range_box_signature(_safe_attr(feature, "RangeBox"))
+        roles = _FEATURE_PARAMETER_PATHS.get(feature_type, ())
+        parameters = _collection_items(_safe_attr(feature, "Parameters"))
+        for parameter in parameters:
+            parameter_name = _safe_name(parameter)
+            if not parameter_name:
+                continue
+            role = None
+            for path in roles:
+                candidate = _safe_path(feature, path)
+                if _safe_name(candidate) == parameter_name:
+                    role = path.rsplit(".", 1)[-1]
+                    break
+            bindings.setdefault(parameter_name, []).append(
+                {
+                    "feature_name": feature_name,
+                    "feature_type": feature_type,
+                    "feature_index": feature_index,
+                    "parameter_role": role,
+                    "face_count": face_count,
+                    "face_signatures": face_signatures,
+                    "feature_bounds": feature_bounds,
+                    "model_bounds": model_bounds,
+                    "preview_face_ids": [],
+                }
+            )
+    return bindings
+
+
+def _parameter_label(name: str, bindings: list[dict[str, Any]]) -> str:
+    if not bindings:
+        return name
+    binding = bindings[0]
+    role = binding.get("parameter_role")
+    if role:
+        readable_role = re.sub(r"(?<!^)([A-Z])", r" \1", role).strip()
+        return f"{binding['feature_name']} · {readable_role}"
+    return f"{binding['feature_name']} · {name}"
 
 
 class InventorAdapter:
@@ -130,26 +356,32 @@ class InventorAdapter:
 
         document = self._open_document(Path(source_path))
         try:
-            return self._parameter_records(self._parameters(document))
+            return self._parameter_records(self._parameters(document), document)
         finally:
             document.Close(False)
 
     @staticmethod
-    def _parameter_records(parameters) -> list[InventorParameter]:
+    def _parameter_records(parameters, document=None) -> list[InventorParameter]:
+        bindings_by_name = _feature_bindings(document) if document is not None else {}
         result: list[InventorParameter] = []
         for index in range(1, parameters.Count + 1):
             parameter = parameters.Item(index)
             expression = str(parameter.Expression)
-            references = set(PARAMETER_REFERENCE_RE.findall(expression)) - {str(parameter.Name)}
+            name = str(parameter.Name)
+            references = set(PARAMETER_REFERENCE_RE.findall(expression)) - {name}
+            feature_bindings = bindings_by_name.get(name, [])
             result.append(
                 InventorParameter(
-                    name=str(parameter.Name),
-                        expression=expression,
-                        value=float(parameter.Value),
-                        display_value=_display_value(float(parameter.Value), str(parameter.Units)),
-                        units=str(parameter.Units),
+                    name=name,
+                    expression=expression,
+                    value=float(parameter.Value),
+                    display_value=_display_value(float(parameter.Value), str(parameter.Units)),
+                    units=str(parameter.Units),
                     comment=str(parameter.Comment or ""),
                     editable=not references,
+                    label=_parameter_label(name, feature_bindings),
+                    feature_bindings=feature_bindings,
+                    mapping_status="feature" if feature_bindings else "parameter_only",
                 )
             )
         return result
@@ -196,7 +428,7 @@ class InventorAdapter:
             translator.SaveCopyAs(document, context, options, data_medium)
             if not destination.is_file() or destination.stat().st_size == 0:
                 raise InventorAdapterError("Inventor did not produce a STEP export.")
-            return self._parameter_records(parameters)
+            return self._parameter_records(parameters, document)
         except InventorAdapterError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -254,7 +486,7 @@ class InventorWorker:
                 if operation == "discover":
                     self._ensure_session(adapter, args[0], source, document, parameters, working_copy)
                     source, document, parameters, working_copy = self._session_state
-                    result["value"] = adapter._parameter_records(parameters)
+                    result["value"] = adapter._parameter_records(parameters, document)
                 elif operation == "rebuild":
                     source_path, output_step, updates = args
                     self._ensure_session(adapter, source_path, source, document, parameters, working_copy)
@@ -279,7 +511,7 @@ class InventorWorker:
                         parameter.Expression = expression
                     document.Update()
                     self._export_step(adapter, document, Path(output_step))
-                    result["value"] = adapter._parameter_records(parameters)
+                    result["value"] = adapter._parameter_records(parameters, document)
                 elif operation == "export_ipt":
                     source_path, output_ipt = args
                     self._ensure_session(adapter, source_path, source, document, parameters, working_copy)
