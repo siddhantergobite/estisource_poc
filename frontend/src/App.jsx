@@ -239,10 +239,12 @@ function ParameterPanel({ analysis, parameterValues, isBusy, onSubmit, onChange,
   return <section className="side-section">
     <div className="section-heading"><div className="section-eyebrow">{isNativeInventor ? "Native Inventor parameters" : isParametric ? "Parametric hammer dimensions" : editingAvailable ? isComplex ? "Editable overall dimensions" : "Editable parameters" : "Detected measurements"}</div><Ruler size={15} /></div>
     {editingAvailable ? <form onSubmit={onSubmit} className="parameter-form">
-      {parameters.map((parameter) => <div key={parameter.key} className={`parameter-row ${hoveredParameterKey === parameter.key ? "is-hovered" : ""}`} onMouseEnter={() => onParameterHover?.(parameter.key)} onMouseLeave={() => onParameterHover?.(null)}>
-        <label htmlFor={`parameter-${parameter.key}`}>{parameter.label}<span>{parameter.unit}</span></label>
-        <div className="input-wrap"><input id={`parameter-${parameter.key}`} type="number" min={isNativeInventor || parameter.key === "angle" ? undefined : "0.000001"} step="any" value={parameterValues[parameter.key] ?? ""} onChange={(event) => onChange(parameter.key, event.target.value)} disabled={isBusy} readOnly={!parameter.editable} placeholder="Upload a model" /><span>{unitLabel(parameter)}</span></div>
-      </div>)}
+      <div className="parameter-scroll" aria-label="Model parameters">
+        {parameters.map((parameter) => <div key={parameter.key} className={`parameter-row ${hoveredParameterKey === parameter.key ? "is-hovered" : ""}`} onMouseEnter={() => onParameterHover?.(parameter.key)} onMouseLeave={() => onParameterHover?.(null)}>
+          <label htmlFor={`parameter-${parameter.key}`}>{parameter.label}<span>{parameter.unit}</span></label>
+          <div className="input-wrap"><input id={`parameter-${parameter.key}`} type="number" min={isNativeInventor || parameter.key === "angle" ? undefined : "0.000001"} step="any" value={parameterValues[parameter.key] ?? ""} onChange={(event) => onChange(parameter.key, event.target.value)} disabled={isBusy} readOnly={!parameter.editable} placeholder="Upload a model" /><span>{unitLabel(parameter)}</span></div>
+        </div>)}
+      </div>
       <p>{isNativeInventor ? "These values are read from the native Inventor parameter table. Changes rebuild the Inventor feature history, export a new STEP, and refresh the OCCT preview; the original .ipt remains unchanged." : isParametric ? "L3 is calculated as L1 - L2. L1 must be greater than L2; the original master file remains unchanged." : isSchemaProfile ? "These schema-driven controls use the named OCCT affine rebuild recipe for this model. AP242 PMI values remain source-only until feature mappings are defined." : isComplex ? "These controls scale and rotate the complete imported model. Named feature parameters require a designer-defined schema. The original uploaded file remains unchanged." : "These controls are generated for this simple model. The original uploaded file remains unchanged."}</p>
       <button className="button primary full" type="submit" disabled={!analysis || isBusy || !hasEditableValues}><Check size={16} /> {isBusy ? "Rebuilding model..." : "Update 3D model"}</button>
     </form> : analysis ? <div className="measurement-panel">
