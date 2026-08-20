@@ -77,7 +77,12 @@ function CadViewer({ mesh, highlightedFaceIds = [], onFaceHover }) {
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
+    controls.enableRotate = true;
+    controls.enableZoom = true;
+    controls.enablePan = true;
+    controls.screenSpacePanning = true;
     controls.target.set(0, 0, 0);
+    renderer.domElement.style.touchAction = "none";
 
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute("position", new THREE.Float32BufferAttribute(mesh.vertices, 3));
@@ -285,6 +290,7 @@ function App() {
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [hoveredParameterKey, setHoveredParameterKey] = useState(null);
   const [hoveredFaceId, setHoveredFaceId] = useState(null);
+  const [hoverSource, setHoverSource] = useState(null);
 
   async function readResponse(response) {
     const payload = await response.json();
@@ -318,6 +324,9 @@ function App() {
       setDocumentId(payload.document_id);
       setAnalysis(payload);
       syncParameters(payload);
+      setHoveredParameterKey(null);
+      setHoveredFaceId(null);
+      setHoverSource(null);
       setFileMeta({ name: file.name, size: file.size });
       setNotice(payload.source_format === "inventor" ? "Inventor model loaded through Inventor + OCCT" : `${payload.source_format.toUpperCase()} model loaded through OCCT`);
     } catch (uploadError) {
@@ -364,6 +373,9 @@ function App() {
       }));
       setAnalysis(payload);
       syncParameters(payload);
+      setHoveredParameterKey(null);
+      setHoveredFaceId(null);
+      setHoverSource(null);
       setNotice("3D model updated");
     } catch (updateError) {
       setError(updateError.message);
@@ -380,6 +392,9 @@ function App() {
       const payload = await readResponse(await fetch(`${API_BASE}/api/documents/${documentId}/reset`, { method: "POST" }));
       setAnalysis(payload);
       syncParameters(payload);
+      setHoveredParameterKey(null);
+      setHoveredFaceId(null);
+      setHoverSource(null);
       setNotice("Original model restored");
     } catch (resetError) {
       setError(resetError.message);
@@ -397,21 +412,29 @@ function App() {
     setNotice("");
     setHoveredParameterKey(null);
     setHoveredFaceId(null);
+    setHoverSource(null);
     if (inputRef.current) inputRef.current.value = "";
   }
 
   const hoveredParameter = analysis?.parameters?.find((parameter) => parameter.key === hoveredParameterKey);
-  const highlightedFaceIds = hoveredParameter?.preview_face_ids?.length
+  const highlightedFaceIds = hoverSource === "parameter" && hoveredParameter?.preview_face_ids?.length
     ? hoveredParameter.preview_face_ids
-    : hoveredFaceId === null ? [] : [hoveredFaceId];
+    : hoverSource === "face" && hoveredFaceId !== null ? [hoveredFaceId] : [];
+  function handleParameterHover(parameterKey) {
+    setHoveredParameterKey(parameterKey);
+    setHoveredFaceId(null);
+    setHoverSource(parameterKey === null ? null : "parameter");
+  }
   function handleFaceHover(faceId) {
     setHoveredFaceId(faceId);
     if (faceId === null) {
       setHoveredParameterKey(null);
+      setHoverSource(null);
       return;
     }
     const linkedParameter = analysis?.parameters?.find((parameter) => parameter.preview_face_ids?.includes(faceId));
     setHoveredParameterKey(linkedParameter?.key ?? null);
+    setHoverSource("face");
   }
 
   return <div className="app-shell">
@@ -431,7 +454,7 @@ function App() {
           {fileMeta && <div className="file-chip"><div className="file-chip-icon">{["ipt", "iam"].includes(fileMeta.name.toLowerCase().split(".").pop()) ? fileMeta.name.toLowerCase().split(".").pop().toUpperCase() : fileMeta.name.toLowerCase().endsWith(".iges") || fileMeta.name.toLowerCase().endsWith(".igs") ? "IGES" : "STEP"}</div><div><strong>{fileMeta.name}</strong><span>{formatBytes(fileMeta.size)} · {["ipt", "iam"].includes(fileMeta.name.toLowerCase().split(".").pop()) ? "Inventor + OCCT" : "OCCT"}</span></div><button aria-label="Remove model" onClick={clearDocument}><X size={14} /></button></div>}
         </section>
 
-        <ParameterPanel analysis={analysis} parameterValues={parameterValues} isBusy={isBusy} onSubmit={applyParameters} onChange={(key, value) => setParameterValues((current) => ({ ...current, [key]: value }))} onReset={resetDocument} hoveredParameterKey={hoveredParameterKey} onParameterHover={setHoveredParameterKey} />
+        <ParameterPanel analysis={analysis} parameterValues={parameterValues} isBusy={isBusy} onSubmit={applyParameters} onChange={(key, value) => setParameterValues((current) => ({ ...current, [key]: value }))} onReset={resetDocument} hoveredParameterKey={hoveredParameterKey} onParameterHover={handleParameterHover} />
         <DetectedFeatures analysis={analysis} />
         <PmiDimensions analysis={analysis} />
         {false && <section className="side-section">

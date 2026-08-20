@@ -416,8 +416,16 @@ class InventorAdapter:
                 else:
                     expression = str(requested)
                 parameter.Expression = expression
-            document.Update()
+            update2 = _safe_attr(document, "Update2")
+            if update2 is not None:
+                try:
+                    update2(True)
+                except Exception:
+                    document.Update()
+            else:
+                document.Update()
             destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.unlink(missing_ok=True)
             translator = self.application.ApplicationAddIns.ItemById(STEP_TRANSLATOR_ID)
             translator.Activate()
             context = self.application.TransientObjects.CreateTranslationContext()
@@ -509,7 +517,14 @@ class InventorWorker:
                         else:
                             expression = str(requested)
                         parameter.Expression = expression
-                    document.Update()
+                    update2 = _safe_attr(document, "Update2")
+                    if update2 is not None:
+                        try:
+                            update2(True)
+                        except Exception:
+                            document.Update()
+                    else:
+                        document.Update()
                     self._export_step(adapter, document, Path(output_step))
                     result["value"] = adapter._parameter_records(parameters, document)
                 elif operation == "export_ipt":
