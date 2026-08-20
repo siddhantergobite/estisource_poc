@@ -32,10 +32,12 @@ function inputValue(value, digits = 3) {
   return Number.isFinite(number) ? Number(number.toFixed(digits)) : "";
 }
 
-function CadViewer({ mesh, highlightedFaceIds = [], onFaceHover }) {
+function CadViewer({ mesh, highlightedFaceIds = [], onFaceHover, hoverLabel = "" }) {
   const mountRef = useRef(null);
+  const canvasHostRef = useRef(null);
   const highlightMeshRef = useRef(null);
   const onFaceHoverRef = useRef(onFaceHover);
+  const [hoverPoint, setHoverPoint] = useState(null);
 
   useEffect(() => {
     onFaceHoverRef.current = onFaceHover;
@@ -60,8 +62,9 @@ function CadViewer({ mesh, highlightedFaceIds = [], onFaceHover }) {
   }, [highlightedFaceIds, mesh]);
 
   useEffect(() => {
-    const mount = mountRef.current;
-    if (!mount || !mesh?.vertices?.length || !mesh?.indices?.length) return undefined;
+    const mount = canvasHostRef.current;
+    const viewer = mountRef.current;
+    if (!mount || !viewer || !mesh?.vertices?.length || !mesh?.indices?.length) return undefined;
 
     const scene = new THREE.Scene();
     scene.background = new THREE.Color("#0a304d");
@@ -121,6 +124,7 @@ function CadViewer({ mesh, highlightedFaceIds = [], onFaceHover }) {
     const pointer = new THREE.Vector2();
     const handlePointerMove = (event) => {
       const bounds = renderer.domElement.getBoundingClientRect();
+      setHoverPoint({ x: event.clientX - bounds.left, y: event.clientY - bounds.top });
       pointer.x = ((event.clientX - bounds.left) / bounds.width) * 2 - 1;
       pointer.y = -((event.clientY - bounds.top) / bounds.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
@@ -129,7 +133,10 @@ function CadViewer({ mesh, highlightedFaceIds = [], onFaceHover }) {
       const faceId = faceIndex === undefined ? null : (mesh.triangle_face_ids ?? [])[faceIndex] ?? null;
       onFaceHoverRef.current?.(faceId);
     };
-    const handlePointerLeave = () => onFaceHoverRef.current?.(null);
+    const handlePointerLeave = () => {
+      setHoverPoint(null);
+      onFaceHoverRef.current?.(null);
+    };
     renderer.domElement.addEventListener("pointermove", handlePointerMove);
     renderer.domElement.addEventListener("pointerleave", handlePointerLeave);
 
@@ -146,14 +153,14 @@ function CadViewer({ mesh, highlightedFaceIds = [], onFaceHover }) {
     scene.add(fillLight);
 
     const resize = () => {
-      const width = mount.clientWidth || 1;
-      const height = mount.clientHeight || 1;
+      const width = viewer.clientWidth || 1;
+      const height = viewer.clientHeight || 1;
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
     };
     const observer = new ResizeObserver(resize);
-    observer.observe(mount);
+    observer.observe(viewer);
     resize();
 
     let frame;
@@ -183,9 +190,17 @@ function CadViewer({ mesh, highlightedFaceIds = [], onFaceHover }) {
   }, [mesh]);
 
   if (!mesh?.vertices?.length) {
-    return <div className="viewer-empty"><Box size={28} /><strong>Upload a STEP or IGES model</strong><span>The 3D solid will appear here.</span></div>;
+    return <div className="viewer-empty"><Box size={28} /><strong>Upload a STEP, IGES, or Inventor model</strong><span>The 3D solid will appear here.</span></div>;
   }
-  return <div ref={mountRef} className="cad-viewer" aria-label="Interactive 3D CAD model viewer" />;
+  const viewerWidth = mountRef.current?.clientWidth ?? 0;
+  const labelStyle = hoverPoint ? {
+    left: Math.min(hoverPoint.x + 14, Math.max(8, viewerWidth - 300)),
+    top: Math.max(8, hoverPoint.y - 44),
+  } : { left: 12, top: 12 };
+  return <div ref={mountRef} className="cad-viewer" aria-label="Interactive 3D CAD model viewer">
+    <div ref={canvasHostRef} className="cad-canvas-host" />
+    {hoverLabel && <div className="cad-hover-label" style={labelStyle}>{hoverLabel}</div>}
+  </div>;
 }
 
 function StatCard({ icon: Icon, label, value, detail }) {
@@ -227,7 +242,6 @@ function ParameterPanel({ analysis, parameterValues, isBusy, onSubmit, onChange,
       {parameters.map((parameter) => <div key={parameter.key} className={`parameter-row ${hoveredParameterKey === parameter.key ? "is-hovered" : ""}`} onMouseEnter={() => onParameterHover?.(parameter.key)} onMouseLeave={() => onParameterHover?.(null)}>
         <label htmlFor={`parameter-${parameter.key}`}>{parameter.label}<span>{parameter.unit}</span></label>
         <div className="input-wrap"><input id={`parameter-${parameter.key}`} type="number" min={isNativeInventor || parameter.key === "angle" ? undefined : "0.000001"} step="any" value={parameterValues[parameter.key] ?? ""} onChange={(event) => onChange(parameter.key, event.target.value)} disabled={isBusy} readOnly={!parameter.editable} placeholder="Upload a model" /><span>{unitLabel(parameter)}</span></div>
-        {isNativeInventor && <small className="parameter-mapping" title={parameter.mapping_description}>{parameter.mapping_status !== "parameter_only" ? parameter.mapping_description : "Feature relationship not detected"}</small>}
       </div>)}
       <p>{isNativeInventor ? "These values are read from the native Inventor parameter table. Changes rebuild the Inventor feature history, export a new STEP, and refresh the OCCT preview; the original .ipt remains unchanged." : isParametric ? "L3 is calculated as L1 - L2. L1 must be greater than L2; the original master file remains unchanged." : isSchemaProfile ? "These schema-driven controls use the named OCCT affine rebuild recipe for this model. AP242 PMI values remain source-only until feature mappings are defined." : isComplex ? "These controls scale and rotate the complete imported model. Named feature parameters require a designer-defined schema. The original uploaded file remains unchanged." : "These controls are generated for this simple model. The original uploaded file remains unchanged."}</p>
       <button className="button primary full" type="submit" disabled={!analysis || isBusy || !hasEditableValues}><Check size={16} /> {isBusy ? "Rebuilding model..." : "Update 3D model"}</button>
@@ -420,6 +434,17 @@ function App() {
   const highlightedFaceIds = hoverSource === "parameter" && hoveredParameter?.preview_face_ids?.length
     ? hoveredParameter.preview_face_ids
     : hoverSource === "face" && hoveredFaceId !== null ? [hoveredFaceId] : [];
+  const hoveredFaceParameters = hoveredFaceId === null ? [] : (analysis?.parameters ?? []).filter((parameter) => parameter.preview_face_ids?.includes(hoveredFaceId));
+  const hoveredFaceLabels = [...new Set(hoveredFaceParameters.map((parameter) => parameter.label).filter(Boolean))];
+  const hoveredFeatureNames = [...new Set(hoveredFaceLabels.map((label) => String(label).split("·")[0].replace(/Â$/, "").trim()))].filter(Boolean);
+  const modelHoverLabel = hoveredFaceLabels.length === 1
+    ? hoveredFaceLabels[0]
+    : hoveredFeatureNames.join(" · ");
+  const hoverLabel = hoverSource === "parameter"
+    ? hoveredParameter?.label ?? ""
+    : hoverSource === "face"
+      ? modelHoverLabel || `Face ${hoveredFaceId}`
+      : "";
   function handleParameterHover(parameterKey) {
     setHoveredParameterKey(parameterKey);
     setHoveredFaceId(null);
@@ -439,7 +464,7 @@ function App() {
 
   return <div className="app-shell">
     <header className="topbar">
-      <div className="brand-lockup"><div className="brand-mark"><Maximize2 size={17} /></div><div><strong>Open CAD Engine</strong><span>STEP / IGES 3D parametric workspace</span></div></div>
+      <div className="brand-lockup"><div className="brand-mark"><Maximize2 size={17} /></div><div><strong>Open CAD Engine</strong><span>STEP / IGES / Inventor 3D parametric workspace</span></div></div>
       <div className="topbar-actions"><span className="engine-status"><i /> OCCT engine online</span><button className="button ghost" onClick={() => inputRef.current?.click()}><FilePlus2 size={16} /> New model</button></div>
     </header>
 
@@ -448,7 +473,7 @@ function App() {
         <section className="side-section project-section">
           <div className="section-eyebrow">Project</div>
           <input ref={inputRef} type="file" accept=".step,.stp,.iges,.igs,.ipt,.iam" onChange={(event) => uploadFile(event.target.files?.[0])} hidden />
-          <button className={`dropzone ${analysis ? "has-file" : ""} ${isDragging ? "is-dragging" : ""}`} onClick={() => inputRef.current?.click()} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} aria-label="Upload or drop a STEP, IGES, or Inventor IPT file">
+          <button className={`dropzone ${analysis ? "has-file" : ""} ${isDragging ? "is-dragging" : ""}`} onClick={() => inputRef.current?.click()} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} aria-label="Upload or drop a STEP, IGES, or Inventor IPT or IAM file">
             <div className="upload-icon"><Upload size={18} /></div><strong>{isDragging ? "Release to upload" : analysis ? "Replace model" : "Upload a 3D model"}</strong><span>{analysis ? fileMeta?.name : "Drag a STEP, IGES, .ipt, or .iam file here"}</span>
           </button>
           {fileMeta && <div className="file-chip"><div className="file-chip-icon">{["ipt", "iam"].includes(fileMeta.name.toLowerCase().split(".").pop()) ? fileMeta.name.toLowerCase().split(".").pop().toUpperCase() : fileMeta.name.toLowerCase().endsWith(".iges") || fileMeta.name.toLowerCase().endsWith(".igs") ? "IGES" : "STEP"}</div><div><strong>{fileMeta.name}</strong><span>{formatBytes(fileMeta.size)} · {["ipt", "iam"].includes(fileMeta.name.toLowerCase().split(".").pop()) ? "Inventor + OCCT" : "OCCT"}</span></div><button aria-label="Remove model" onClick={clearDocument}><X size={14} /></button></div>}
@@ -470,19 +495,19 @@ function App() {
 
         <section className="side-section">
           <div className="section-heading"><div className="section-eyebrow">Editing mode</div><Layers3 size={15} /></div>
-          <div className="mode-card"><strong>{analysis?.mode === "native_parametric" ? "Native Inventor" : analysis?.mode === "parametric" ? "Parametric" : analysis?.editing_available ? "Free-form" : analysis ? "Measurement-only" : "Waiting for model"}</strong><span>{analysis?.complexity_reason ?? "The available controls will be based on the uploaded model."}</span><em>{analysis?.mode === "native_parametric" ? "Inventor feature rebuild active; OCCT preview enabled" : analysis?.mode === "parametric" ? "Constraints active: L3 = L1 - L2" : analysis?.editing_available ? analysis.complexity === "complex" ? "Whole-model editing is active; named feature schemas are the next layer" : "Named parametric schemas are the next layer" : analysis ? "Configure named parameters for this model to enable editing" : "Upload STEP or IGES to begin"}</em></div>
+          <div className="mode-card"><strong>{analysis?.mode === "native_parametric" ? "Native Inventor" : analysis?.mode === "parametric" ? "Parametric" : analysis?.editing_available ? "Free-form" : analysis ? "Measurement-only" : "Waiting for model"}</strong><span>{analysis?.complexity_reason ?? "The available controls will be based on the uploaded model."}</span><em>{analysis?.mode === "native_parametric" ? "Inventor feature rebuild active; OCCT preview enabled" : analysis?.mode === "parametric" ? "Constraints active: L3 = L1 - L2" : analysis?.editing_available ? analysis.complexity === "complex" ? "Whole-model editing is active; named feature schemas are the next layer" : "Named parametric schemas are the next layer" : analysis ? "Configure named parameters for this model to enable editing" : "Upload STEP, IGES, IPT, or IAM to begin"}</em></div>
         </section>
         <div className="sidebar-footer"><span>Open-source 3D PoC</span><span>v0.2.0</span></div>
       </aside>
 
       <section className="main-panel">
-        <div className="content-heading"><div><div className="section-eyebrow">Workspace / {analysis ? "3D model review" : "Getting started"}</div><h1>{analysis ? fileMeta?.name : "Build from a real 3D model"}</h1><p>{analysis ? "Inspect the imported solid, orbit the view, and edit its dimensions." : "An open-source STEP / IGES foundation for interactive CAD editing."}</p></div><div className="heading-actions">{notice && <span className="notice"><Check size={14} /> {notice}</span>}{error && <span className="error-message">{error}</span>}{analysis && <button className="button primary" onClick={() => setIsExportOpen(true)}><Download size={16} /> Export</button>}</div></div>
+        <div className="content-heading"><div><div className="section-eyebrow">Workspace / {analysis ? "3D model review" : "Getting started"}</div><h1>{analysis ? fileMeta?.name : "Build from a real 3D model"}</h1><p>{analysis ? "Inspect the imported solid, orbit the view, and edit its dimensions." : "An open-source STEP / IGES / Inventor foundation for interactive CAD editing."}</p></div><div className="heading-actions">{notice && <span className="notice"><Check size={14} /> {notice}</span>}{error && <span className="error-message">{error}</span>}{analysis && <button className="button primary" onClick={() => setIsExportOpen(true)}><Download size={16} /> Export</button>}</div></div>
 
         <div className="stats-grid"><StatCard icon={Box} label="Solids" value={analysis ? formatNumber(analysis.solid_count, 0) : "—"} detail="B-Rep bodies" /><StatCard icon={Layers3} label="Faces" value={analysis ? formatNumber(analysis.face_count, 0) : "—"} detail="topology" /><StatCard icon={Maximize2} label="Length" value={analysis ? `${formatNumber(analysis.length)} ${analysis.units?.symbol ?? "u"}` : "—"} detail="editable axis" /><StatCard icon={Ruler} label="Breadth" value={analysis ? `${formatNumber(analysis.breadth)} ${analysis.units?.symbol ?? "u"}` : "—"} detail="editable axis" /><StatCard icon={Box} label="Height" value={analysis ? `${formatNumber(analysis.height)} ${analysis.units?.symbol ?? "u"}` : "—"} detail="editable axis" /></div>
 
-        <div className="model-card"><div className="card-toolbar"><div><strong>3D model preview</strong><span>{analysis ? `${formatNumber(analysis.mesh.triangle_count, 0)} triangles · orbit / zoom enabled` : "Waiting for a STEP or IGES model"}</span></div><span className="view-badge">OCCT mesh</span></div><CadViewer mesh={analysis?.mesh} highlightedFaceIds={highlightedFaceIds} onFaceHover={handleFaceHover} /></div>
+        <div className="model-card"><div className="card-toolbar"><div><strong>3D model preview</strong><span>{analysis ? `${formatNumber(analysis.mesh.triangle_count, 0)} triangles · orbit / zoom enabled` : "Waiting for a STEP, IGES, or Inventor model"}</span></div><span className="view-badge">OCCT mesh</span></div><CadViewer mesh={analysis?.mesh} highlightedFaceIds={highlightedFaceIds} onFaceHover={handleFaceHover} hoverLabel={hoverLabel} /></div>
 
-        <div className="lower-grid"><section className="data-card"><div className="card-toolbar"><div><strong>Model measurements</strong><span>Values extracted from the OCCT model · {analysis?.units?.name ?? "unit not declared"}</span></div></div>{analysis ? <div className="dimension-list">{analysis.parameters.map((parameter) => <div key={parameter.key}><span>{parameter.label}</span><strong>{formatNumber(parameter.value, 6)} <small>{parameter.unit === "deg" ? "deg" : parameter.unit}</small></strong><em className={parameter.editable ? "editable-tag" : "detected-tag"}>{parameter.editable ? "Editable" : "Detected"}</em></div>)}<div><span>Edges / vertices</span><strong>{formatNumber(analysis.edge_count, 0)} / {formatNumber(analysis.vertex_count, 0)}</strong><em className="detected-tag">Detected</em></div></div> : <div className="card-empty">Measurements will populate after upload.</div>}</section><section className="data-card"><div className="card-toolbar"><div><strong>Engine status</strong><span>Current 3D PoC boundaries</span></div></div><div className="engine-notes"><div><Check size={15} /><span>STEP and IGES imported with OCCT</span></div><div><Check size={15} /><span>Original production file is immutable</span></div><div><Check size={15} /><span>Edited geometry exports back to source format</span></div><div><Check size={15} /><span>{analysis?.valid ? "Shape validation passed" : "Upload a model to validate"}</span></div></div></section></div>
+        <div className="lower-grid"><section className="data-card"><div className="card-toolbar"><div><strong>Model measurements</strong><span>Values extracted from the OCCT model · {analysis?.units?.name ?? "unit not declared"}</span></div></div>{analysis ? <div className="dimension-list">{analysis.parameters.map((parameter) => <div key={parameter.key}><span>{parameter.label}</span><strong>{formatNumber(parameter.value, 6)} <small>{parameter.unit === "deg" ? "deg" : parameter.unit}</small></strong><em className={parameter.editable ? "editable-tag" : "detected-tag"}>{parameter.editable ? "Editable" : "Detected"}</em></div>)}<div><span>Edges / vertices</span><strong>{formatNumber(analysis.edge_count, 0)} / {formatNumber(analysis.vertex_count, 0)}</strong><em className="detected-tag">Detected</em></div></div> : <div className="card-empty">Measurements will populate after upload.</div>}</section><section className="data-card"><div className="card-toolbar"><div><strong>Engine status</strong><span>Current 3D PoC boundaries</span></div></div><div className="engine-notes"><div><Check size={15} /><span>STEP, IGES, and Inventor models imported through OCCT</span></div><div><Check size={15} /><span>Original production file is immutable</span></div><div><Check size={15} /><span>Edited geometry exports back to source format</span></div><div><Check size={15} /><span>{analysis?.valid ? "Shape validation passed" : "Upload a model to validate"}</span></div></div></section></div>
       </section>
       {isExportOpen && <ExportModal documentId={documentId} sourceFormat={analysis?.source_format} nativeFormat={analysis?.native_format} onClose={() => setIsExportOpen(false)} />}
     </main>
