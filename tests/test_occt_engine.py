@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox
 import pytest
 
@@ -39,3 +41,24 @@ def test_step_round_trip_preserves_a_solid():
 
     assert exported.startswith(b"ISO-10303-")
     assert analyze_shape(restored, include_mesh=False).solid_count == 1
+
+
+def test_step_primitive_exchange_fixture_is_imported():
+    fixture = Path("samples/step_block_part_sample.step")
+    restored = load_shape(fixture.read_bytes(), "step")
+    analysis = analyze_shape(restored, include_mesh=False)
+
+    assert analysis.solid_count == 1
+    assert analysis.length == pytest.approx(40)
+    assert analysis.breadth == pytest.approx(20)
+    assert analysis.height == pytest.approx(8)
+
+
+def test_step_primitive_assembly_exchange_fixture_is_imported():
+    fixture = Path("samples/step_assembly_exchange_sample.step")
+    restored = load_shape(fixture.read_bytes(), "step")
+    analysis = analyze_shape(restored, include_mesh=False)
+
+    assert analysis.solid_count == 3
+    assert analysis.length == pytest.approx(60)
+    assert analysis.breadth == pytest.approx(35)

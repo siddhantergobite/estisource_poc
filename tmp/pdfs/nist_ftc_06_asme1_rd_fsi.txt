@@ -1,0 +1,119 @@
+nist_ftc_06_asme1_rd_fsi.xlsx 1 of 2
+NIST Fully-Toleranced Test Case 06 - Feature and Specification Index [FTC06]
+12/14/2016 Rev. D
+Bryan Fischer Advanced Dimensional Management LLC
+Feature ID Feature Description Specification Element ID Comments
+F1 Datum Feature A Flatness .01 T1
+Datum Feature Symbol A DF1
+F2 Datum Feature B 12.00 ±.01 D1
+Perpendicularity .012|A T2
+Datum Feature Symbol B DF2
+F3 Datum Feature C Perpendicularity .012|A|B T3
+Datum Feature Symbol C DF3
+F4 Datum Feature D Profile Surface .02|A|B|C T4
+Flatness .01 T5
+Datum Feature Symbol D DF4
+F5 Datum Feature E Profile Surface .02|A|B|C T6
+Flatness .01 T7
+Datum Feature Symbol E DF5
+F6-F9 Datum Feature F 4X .281 ±.008 D2
+Position .015|E|A|B T8
+Datum Feature Symbol F DF6
+4X INDIVIDUALLY STR1
+F10 Datum Target G1 Datum Target Symbol G1 DT1
+Represented line element RLE1 Circular line element for datum target 
+G1 and controlled element
+(1.000) D3 Defines RLE1
+F11-F12 Datum Target H1 Datum Target Symbol H1 DT2
+Represented line element RLE2 Circular line element for datum target 
+H1 and controlled element
+(1.000) D4 Defines RLE2
+F12-F13 Datum Target J1, J2 Datum Target Symbols J1-J2 DT3, DT4
+Profile Surface .05|D|B|C
+Profile Surface .01|D T9 Surfaces are grouped
+2 SURFACES STR2 Groups surfaces for T9
+Represented line element RLE3
+Represented line element RLE4
+(1.106) D5 Applies to datum target lines
+F14-F15 Datum Target K1, K2 Datum Target Symbols K1-K2 DT5, DT6
+Profile Surface .05|D|B|C
+Profile Surface .01|D T10 Surfaces are grouped
+2 SURFACES STR3 Groups surfaces for T10
+Represented line element RLE5
+Represented line element RLE6
+(1.106) D6 Applies to datum target lines
+F16-F17 Spherical Diameter Surfaces 2X S 1.250 ±.008 D7
+Position S.025|D|B|C T11
+F18-21 Counterbored Holes - Set 1 4X .415 ±.008 D8
+F22-F25 .625 ±.020 D9-1
+Position .025|A|B|C T12 Applies to F18-F28
+F26-F29 .50 ±.02 D9-2
+F30-F31 Counterbored Holes - Set 2 2X ∅.562 ±.008 D10
+Position .015|C|A|B T13
+F32-F33 2X  ∅.812 ±.020 D11-1
+Position .025|C|A|B T14
+F34-F35 .56 ±.02 D11-2
+F36-F39 Counterbored Holes - Set 3 .40 ±.01 D12-1
+Position .02|F T15 Applies individually to 4 holes
+F40-F43 .31 ±.02 D12-2
+nist_ftc_06_asme1_rd_fsi.xlsx 2 of 2
+NIST Fully-Toleranced Test Case 06 - Feature and Specification Index [FTC06]
+12/14/2016 Rev. D
+Bryan Fischer Advanced Dimensional Management LLC
+Feature ID Feature Description Specification Element ID Comments
+4X INDIVIDUALLY STR4
+F44-F67 Fillets 24X R.125 ±.020 D13
+F68 Spherical Cutout (SR.500) D14 Reference Dimension
+F69-F70 Large External Rounds 2X CR.50 ±.02 D15
+F71 Tapered Center Rib Surface  1.00 : 2.00 D16 Basic Dimension
+Profile Surface .04|A|B|C T16
+F72-F73 Conic Surfaces 2X 1.00 : 3.00 D17 Basic Dimension
+Cone w/ G1 Profile Surface .05|D|B|C
+Profile Surface .01|D T17 Applies to cone and cylinder
+F74 Cylindrical Cone Support Profile Surface .05|D|B|C
+Profile Surface .01|D T17 Applies to cone and cylinder
+Cone w/ H1 Profile Surface .05|D|B|C
+Profile Surface .01|D T18 Applies to cone and cylinder
+F75 Cylindrical Cone Support Profile Surface .05|D|B|C
+Profile Surface .01|D T18 Applies to cone and cylinder
+F76 Cylindrical hole in cone w/ G1 .250  ±.008 D18
+Position .015|D|G T19
+F77 Bottom of Hole .50 ±.05 D19
+F78 Cylindrical hole in cone w/ H1 .250  ±.008 D20
+Position .015|D|H T20
+F79 Bottom of Hole .50 ±.05 D21
+F80 Width feature of size @ J1-J2 .500 ±.008 D22
+Position .025|D|C|J T21
+F81 Width feature of size @ K1-K2 .500 ±.008 D23
+Position .025|D|C|K T22
+- General Profile Tolerance 1 Profile Surface .05|A|B|C T23
+MCS1 MCS for Views 1, 2, 3 CS1-1 Main MCS for model
+MCS for DRF A CS1-2 Same location as CS1-1
+MCS for DRF A|B CS1-3 Same location as CS1-1
+MCS for DRF A|B|C CS1-4 Same location as CS1-1
+MCS for DRF C|A|B CS1-5 Same location as CS1-1
+MCS2 MCS for DRF D|B|C CS2
+MCS3 MCS for DRF E|A|B CS3
+MCS4 MCS for DRF F1 CS4 First of 4 individual datum reference 
+frames for F
+MCS5 MCS for DRF F2 CS5 Second of 4 individual datum 
+reference frames for F
+MCS6 MCS for DRF F3 CS6 Third of 4 individual datum reference 
+frames for F
+MCS7 MCS for DRF F4 CS7 Fourth of 4 individual datum reference 
+frames for F
+MCS8 MCS for DRF D|G CS8
+MCS9 MCS for DRF D|H CS9
+MCS10 MCS for DRF D|C|J CS10
+MCS11 MCS for DRF D|C|K CS11
+- General Notes NOTES… STR5 Flat to screen
+Notes: L E G E N D
+- There are no specifications in this FTC that contain semantically- CS Coordinate System
+important extension lines or annotation plane placement. D Dimension
+DF Datum Feature
+Revisions: DT Datum Target
+RLE Represented Line Element
+SIELD PMI entity contains Semantically-
+Important Extension Line Direction
+STR String
+T Tolerance

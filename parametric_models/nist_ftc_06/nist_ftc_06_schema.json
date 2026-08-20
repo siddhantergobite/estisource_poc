@@ -1,0 +1,60 @@
+{
+  "model_id": "nist_ftc_06_ap242",
+  "display_name": "NIST FTC-06 AP242",
+  "source": {
+    "format": "STEP AP242",
+    "filename": "nist_ftc_06_asme1_ap242-e2.stp"
+  },
+  "rebuild_recipe": {
+    "engine": "occt",
+    "operation": "affine_scale_rotate",
+    "implementation": "cad_engine.occt_engine.apply_freeform_parameters",
+    "scope": "whole_model",
+    "description": "Safely scales the complete imported B-Rep and rotates it around Z."
+  },
+  "parameters": [
+    {
+      "key": "length",
+      "label": "Overall length",
+      "unit": "model units",
+      "editable": true,
+      "source": "geometry.bounds.x",
+      "operation": "scale_axis_x"
+    },
+    {
+      "key": "breadth",
+      "label": "Overall breadth",
+      "unit": "model units",
+      "editable": true,
+      "source": "geometry.bounds.y",
+      "operation": "scale_axis_y"
+    },
+    {
+      "key": "height",
+      "label": "Overall height",
+      "unit": "model units",
+      "editable": true,
+      "source": "geometry.bounds.z",
+      "operation": "scale_axis_z"
+    },
+    {
+      "key": "angle",
+      "label": "Z angle",
+      "unit": "deg",
+      "editable": true,
+      "default": 0.0,
+      "source": "application.edit_state",
+      "operation": "rotate_z"
+    }
+  ],
+  "constraints": [
+    "length > 0",
+    "breadth > 0",
+    "height > 0"
+  ],
+  "pmi_policy": {
+    "source": "AP242 semantic PMI",
+    "editable": false,
+    "reason": "The neutral STEP file contains PMI values but no feature history or model-specific rebuild recipe."
+  }
+}

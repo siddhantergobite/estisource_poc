@@ -1,0 +1,997 @@
+{
+  "source": "INV_nist_ftc_06_asme1_2021.ipt",
+  "parameters": [
+    {
+      "name": "d0",
+      "expression": "1.25 in",
+      "value": 3.175,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1",
+      "expression": "1.25 in",
+      "value": 3.175,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d2",
+      "expression": "1 in",
+      "value": 2.54,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d3",
+      "expression": "9.25 in",
+      "value": 23.495,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d4",
+      "expression": "2 in",
+      "value": 5.08,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d5",
+      "expression": "3.85 in",
+      "value": 9.779,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d6",
+      "expression": "12 in",
+      "value": 30.48,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d7",
+      "expression": "0.0 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d9",
+      "expression": "0.6 in",
+      "value": 1.524,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d11",
+      "expression": "1 in",
+      "value": 2.54,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d12",
+      "expression": "0 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d13",
+      "expression": "0 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d14",
+      "expression": "0.1 in",
+      "value": 0.254,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d15",
+      "expression": "0.1 in",
+      "value": 0.254,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d16",
+      "expression": "115 deg",
+      "value": 2.007128639793479,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d17",
+      "expression": "d16",
+      "value": 2.007128639793479,
+      "units": "deg",
+      "comment": "",
+      "editable": false
+    },
+    {
+      "name": "d18",
+      "expression": "2.5 in",
+      "value": 6.35,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d19",
+      "expression": "0.55 in",
+      "value": 1.3970000000000002,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d20",
+      "expression": "0.5 in",
+      "value": 1.27,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d21",
+      "expression": "1.25 in",
+      "value": 3.175,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d23",
+      "expression": "0.0 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d25",
+      "expression": "1.25 in",
+      "value": 3.175,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d28",
+      "expression": "3.25 in",
+      "value": 8.255,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d29",
+      "expression": "3 in",
+      "value": 7.62,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d30",
+      "expression": "0.6 in",
+      "value": 1.524,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d31",
+      "expression": "0.0 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d35",
+      "expression": "-1.25 in",
+      "value": -3.175,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d39",
+      "expression": "3.8 in",
+      "value": 9.652,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d40",
+      "expression": "0.45 in",
+      "value": 1.143,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d41",
+      "expression": "1.25 in",
+      "value": 3.175,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d42",
+      "expression": "1.250 in",
+      "value": 3.1749999999999936,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d44",
+      "expression": "1.5 in",
+      "value": 3.81,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d45",
+      "expression": "0.75 in",
+      "value": 1.905,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d46",
+      "expression": "0 ul",
+      "value": 0.0,
+      "units": "ul",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d47",
+      "expression": "90 deg",
+      "value": 1.5707963267948966,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d48",
+      "expression": "0 ul",
+      "value": 0.0,
+      "units": "ul",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d49",
+      "expression": "90 deg",
+      "value": 1.5707963267948966,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d50",
+      "expression": "1.75 in",
+      "value": 4.445,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d51",
+      "expression": "1.75 in",
+      "value": 4.445,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d52",
+      "expression": "2 in",
+      "value": 5.08,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d53",
+      "expression": "2 in",
+      "value": 5.08,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d54",
+      "expression": "1.725 in",
+      "value": 4.3815,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d55",
+      "expression": "2.85 in",
+      "value": 7.239000000000001,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d56",
+      "expression": "1.5 in",
+      "value": 3.81,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d57",
+      "expression": "0.0 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d76",
+      "expression": "0.85 in",
+      "value": 2.159,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d77",
+      "expression": "1.125 in",
+      "value": 2.857499999999998,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d78",
+      "expression": "0.562 in",
+      "value": 1.42748,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d85",
+      "expression": "1 in",
+      "value": 2.540000000000001,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d86",
+      "expression": "2.25 in",
+      "value": 5.714999999999999,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d87",
+      "expression": "0.415 in",
+      "value": 1.0541,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d89",
+      "expression": "0.625 in",
+      "value": 1.5875,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d90",
+      "expression": "0.5 in",
+      "value": 1.27,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d92",
+      "expression": "1.25 in",
+      "value": 3.175,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d104",
+      "expression": "0.5 in",
+      "value": 1.27,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d106",
+      "expression": "1 in",
+      "value": 2.54,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d269",
+      "expression": "0.250 in",
+      "value": 0.6349999999999998,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d270",
+      "expression": "4.900 in",
+      "value": 12.446,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d271",
+      "expression": "0.1 in",
+      "value": 0.254,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d272",
+      "expression": "0.0 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d413",
+      "expression": "0.25 in",
+      "value": 0.635,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d418",
+      "expression": "0.5 in",
+      "value": 1.27,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d419",
+      "expression": "118 deg",
+      "value": 2.059488517353309,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d477",
+      "expression": "-0.75 in",
+      "value": -1.905,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d478",
+      "expression": "1 in",
+      "value": 2.54,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d479",
+      "expression": "1 in",
+      "value": 2.54,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d532",
+      "expression": "6.000 in",
+      "value": 15.24,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d533",
+      "expression": "1.500 in",
+      "value": 3.81,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d534",
+      "expression": "-0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d535",
+      "expression": "90.00 deg",
+      "value": 1.5707963267948966,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d536",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d537",
+      "expression": "180.00 deg",
+      "value": 3.141592653589793,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d543",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d544",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d545",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d546",
+      "expression": "90.00 deg",
+      "value": 1.5707963267948966,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d547",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d548",
+      "expression": "180.00 deg",
+      "value": 3.141592653589793,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d570",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d571",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d572",
+      "expression": "-0.250 in",
+      "value": -0.635,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d573",
+      "expression": "90.00 deg",
+      "value": 1.5707963267948966,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d574",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d575",
+      "expression": "180.00 deg",
+      "value": 3.141592653589793,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d811",
+      "expression": "2 ul",
+      "value": 2.0,
+      "units": "ul",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d813",
+      "expression": "4.750 in * 2 ul",
+      "value": 24.13,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d814",
+      "expression": "0.812 in",
+      "value": 2.0624800000000003,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d819",
+      "expression": "0.56 in",
+      "value": 1.4224,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d822",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d824",
+      "expression": "0.125 in",
+      "value": 0.3175,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d825",
+      "expression": "0.40 in",
+      "value": 1.016,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d830",
+      "expression": "0.31 in",
+      "value": 0.7874,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d832",
+      "expression": "0.40 in",
+      "value": 1.016,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d837",
+      "expression": "0.31 in",
+      "value": 0.7874,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d839",
+      "expression": "0.40 in",
+      "value": 1.016,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d844",
+      "expression": "0.31 in",
+      "value": 0.7874,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d846",
+      "expression": "0.40 in",
+      "value": 1.016,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d851",
+      "expression": "0.31 in",
+      "value": 0.7874,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d916",
+      "expression": "0.281 in",
+      "value": 0.71374,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1030",
+      "expression": "-0.6 in",
+      "value": -1.524,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1075",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1076",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1077",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1078",
+      "expression": "-90.00 deg",
+      "value": -1.5707963267948966,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1079",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1080",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1081",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1082",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1083",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1084",
+      "expression": "90.00 deg",
+      "value": 1.5707963267948966,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1085",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1086",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1087",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1088",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1089",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1090",
+      "expression": "90.00 deg",
+      "value": 1.5707963267948966,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1091",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1092",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1093",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1094",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1095",
+      "expression": "0.000 in",
+      "value": 0.0,
+      "units": "in",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1096",
+      "expression": "90.00 deg",
+      "value": 1.5707963267948966,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1097",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    },
+    {
+      "name": "d1098",
+      "expression": "0.00 deg",
+      "value": 0.0,
+      "units": "deg",
+      "comment": "",
+      "editable": true
+    }
+  ]
+}

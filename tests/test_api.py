@@ -154,6 +154,30 @@ def test_parametric_hammer_rebuilds_with_constraints_and_exports():
     DOCUMENTS.clear()
 
 
+def test_nist_ftc_06_schema_profile_rebuilds_overall_dimensions():
+    client = TestClient(app)
+    sample = Path("samples/nist/NIST-PMI-STEP-Files/nist_ftc_06_asme1_ap242-e2.stp")
+    uploaded = client.post("/api/documents", files={"file": (sample.name, sample.read_bytes(), "application/step")})
+
+    assert uploaded.status_code == 200
+    payload = uploaded.json()
+    assert payload["profile"] == "nist_ftc_06_ap242"
+    assert payload["mode"] == "schema"
+    assert payload["parameter_schema"]
+    assert payload["pmi_summary"]["count"] == 25
+    assert payload["pmi_summary"]["editable_count"] == 0
+
+    edited = client.post(
+        f"/api/documents/{payload['document_id']}/parameters",
+        json={"length": payload["length"] * 1.1, "breadth": payload["breadth"], "height": payload["height"], "angle": 12},
+    )
+    assert edited.status_code == 200
+    assert edited.json()["length"] == pytest.approx(payload["length"] * 1.1)
+    assert edited.json()["angle"] == pytest.approx(12)
+    assert edited.json()["mesh"]["triangle_count"] > 0
+    DOCUMENTS.clear()
+
+
 def test_api_rejects_legacy_2d_formats():
     client = TestClient(app)
     response = client.post("/api/documents", files={"file": ("drawing.dxf", b"not a 3D model", "application/dxf")})

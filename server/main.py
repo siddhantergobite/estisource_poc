@@ -1,4 +1,4 @@
-"""HTTP API for STEP/IGES upload, 3D inspection, editing, and export."""
+"""HTTP API for STEP/IGES and native Inventor upload, inspection, editing, and export."""
 
 from __future__ import annotations
 
@@ -8,14 +8,17 @@ import json
 from math import isfinite
 from pathlib import Path
 import re
+import tempfile
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from OCP.BRepBuilderAPI import BRepBuilderAPI_Copy
 
 from cad_engine.occt_engine import (
+    Cad3DAnalysis,
     SUPPORTED_FORMATS,
     analyze_shape,
     apply_freeform_parameters,
@@ -26,10 +29,12 @@ from cad_engine.occt_engine import (
     load_shape,
     make_parametric_hammer_shape,
 )
+from cad_engine.inventor_adapter import InventorAdapterError, get_inventor_worker
 
 
 MAX_FILE_SIZE = 50 * 1024 * 1024
 MAX_DOCUMENTS = 20
+NATIVE_WORK_ROOT = Path(tempfile.gettempdir()) / "open-cad-engine-native"
 PARAMETER_METADATA_PATH = Path(__file__).resolve().parents[1] / ".cad_parameter_metadata.json"
 
 HAMMER_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "parametric_models" / "hammer" / "hammer_schema.json"
@@ -37,6 +42,11 @@ HAMMER_CONTRACT = json.loads(HAMMER_SCHEMA_PATH.read_text(encoding="utf-8"))
 HAMMER_SCHEMA = HAMMER_CONTRACT["parameters"]
 HAMMER_DEFAULTS = {parameter["key"]: float(parameter["default"]) for parameter in HAMMER_SCHEMA}
 HAMMER_CONSTRAINTS = HAMMER_CONTRACT["constraints"]
+
+NIST_FTC_06_SCHEMA_PATH = Path(__file__).resolve().parents[1] / "parametric_models" / "nist_ftc_06" / "nist_ftc_06_schema.json"
+NIST_FTC_06_CONTRACT = json.loads(NIST_FTC_06_SCHEMA_PATH.read_text(encoding="utf-8"))
+NIST_FTC_06_SCHEMA = NIST_FTC_06_CONTRACT["parameters"]
+NIST_FTC_06_CONSTRAINTS = NIST_FTC_06_CONTRACT["constraints"]
 
 
 @dataclass
@@ -46,11 +56,18 @@ class StoredDocument:
     original_bytes: bytes
     working_bytes: bytes
     source_format: str
+    geometry_format: str
     parameter_state: dict[str, float]
     pmi_dimensions: list[dict]
     unit_info: dict[str, str | bool]
     profile: str | None = None
     profile_state: dict[str, float] | None = None
+    native_source_path: Path | None = None
+    native_parameters: list[dict] | None = None
+    shape: object | None = None
+    analysis: Cad3DAnalysis | None = None
+    original_shape: object | None = None
+    original_analysis: Cad3DAnalysis | None = None
 
 
 class ParameterRequest(BaseModel):
@@ -95,14 +112,20 @@ app.add_middleware(
 
 def _canonical_format(filename: str) -> str:
     extension = Path(filename).suffix.lower().lstrip(".")
+    if extension in {"ipt", "iam"}:
+        return "inventor"
     if extension not in SUPPORTED_FORMATS:
-        raise HTTPException(status_code=400, detail="Supported 3D CAD files are .step, .stp, .iges, and .igs.")
+        raise HTTPException(status_code=400, detail="Supported 3D CAD files are .step, .stp, .iges, .igs, .ipt, and .iam.")
     return "step" if extension in {"step", "stp"} else "iges"
 
 
 def _profile_for_filename(filename: str) -> str | None:
     stem = Path(filename).stem.lower().replace("-", "_").replace(" ", "_")
-    return "parametric_hammer" if "parametrichammer" in stem or "parametric_hammer" in stem else None
+    if "parametrichammer" in stem or "parametric_hammer" in stem:
+        return "parametric_hammer"
+    if "nist_ftc_06_asme1_ap242_e2" in stem:
+        return "nist_ftc_06_ap242"
+    return None
 
 
 _HAMMER_FILENAME_KEYS = {parameter["key"].lower(): parameter["key"] for parameter in HAMMER_SCHEMA}
@@ -154,15 +177,29 @@ def _hammer_export_name(filename: str, state: dict[str, float], extension: str) 
 
 
 def _load_document_shape(document: StoredDocument):
+    if document.shape is not None:
+        return document.shape
     try:
-        return load_shape(document.working_bytes, document.source_format)
+        document.shape = load_shape(document.working_bytes, document.geometry_format)
+        return document.shape
     except Exception as exc:  # noqa: BLE001 - return parser details to the client
         raise HTTPException(status_code=400, detail=f"Could not read the 3D CAD model: {exc}") from exc
 
 
-def _initial_parameters(shape) -> dict[str, float]:
-    analysis = analyze_shape(shape, include_mesh=False)
+def _initial_parameters(shape, analysis: Cad3DAnalysis | None = None) -> dict[str, float]:
+    analysis = analysis or analyze_shape(shape, include_mesh=False)
     return {"length": round(analysis.length, 6), "breadth": round(analysis.breadth, 6), "height": round(analysis.height, 6), "angle": 0.0}
+
+
+def _analyze_preview_shape(shape) -> Cad3DAnalysis:
+    """Analyze a copy so the cached editable shape stays safe to transform.
+
+    OCCT's mesher annotates the shape with triangulation data. Keeping that
+    data off the working shape avoids native crashes in transforms/exports for
+    some imported IGES models while still caching the expensive analysis.
+    """
+
+    return analyze_shape(BRepBuilderAPI_Copy(shape).Shape())
 
 
 def _is_simple_model(analysis) -> bool:
@@ -171,12 +208,16 @@ def _is_simple_model(analysis) -> bool:
     return analysis.face_count <= 20 and analysis.edge_count <= 80 and analysis.solid_count <= 1
 
 
-def _analysis_payload(document: StoredDocument, shape=None) -> dict:
+def _analysis_payload(document: StoredDocument, shape=None, analysis: Cad3DAnalysis | None = None) -> dict:
     shape = shape or _load_document_shape(document)
-    analysis = analyze_shape(shape)
+    analysis = analysis or document.analysis or analyze_shape(shape)
+    document.shape = shape
+    document.analysis = analysis
     values = document.parameter_state
     is_simple = _is_simple_model(analysis)
     is_parametric = document.profile == "parametric_hammer"
+    is_nist_ftc_06 = document.profile == "nist_ftc_06_ap242"
+    is_native_inventor = document.source_format == "inventor"
     editing_available = True
     detected_features = detect_geometry_features(shape)
     unit_info = document.unit_info
@@ -191,7 +232,20 @@ def _analysis_payload(document: StoredDocument, shape=None) -> dict:
     dimension_label = "Length" if is_simple else "Overall length"
     breadth_label = "Breadth" if is_simple else "Overall breadth"
     height_label = "Height" if is_simple else "Overall height"
-    if is_parametric:
+    if is_native_inventor:
+        parameters = [
+            {
+                "key": parameter["name"],
+                "label": f"Inventor {parameter['name']}",
+                "value": parameter["display_value"],
+                "unit": "deg" if parameter["units"] == "deg" else parameter["units"],
+                "editable": parameter["editable"],
+                "native_parameter": parameter["name"],
+                "expression": parameter["expression"],
+            }
+            for parameter in (document.native_parameters or [])
+        ]
+    elif is_parametric:
         profile_values = document.profile_state or HAMMER_DEFAULTS
         parameters = [
             {
@@ -200,6 +254,15 @@ def _analysis_payload(document: StoredDocument, shape=None) -> dict:
                 "unit": "deg" if parameter["unit"] == "deg" else unit_info["symbol"],
             }
             for parameter in HAMMER_SCHEMA
+        ]
+    elif is_nist_ftc_06:
+        parameters = [
+            {
+                **parameter,
+                "value": values[parameter["key"]],
+                "unit": "deg" if parameter["unit"] == "deg" else unit_info["symbol"],
+            }
+            for parameter in NIST_FTC_06_SCHEMA
         ]
     else:
         parameters = [
@@ -212,18 +275,20 @@ def _analysis_payload(document: StoredDocument, shape=None) -> dict:
         "document_id": document.document_id,
         "filename": document.filename,
         "source_format": document.source_format,
-        "engine": "occt",
-        "mode": "parametric" if is_parametric else "freeform",
+        "native_format": Path(document.filename).suffix.lower().lstrip(".") if is_native_inventor else None,
+        "engine": "inventor+occt" if is_native_inventor else "occt",
+        "mode": "native_parametric" if is_native_inventor else "parametric" if is_parametric else "schema" if is_nist_ftc_06 else "freeform",
         "editing_available": editing_available,
         "complexity": "simple" if is_simple else "complex",
-        "complexity_reason": "Named hammer parameters are linked to a rebuild recipe." if is_parametric else "Simple geometry supports free-form editing." if is_simple else "Complex geometry supports whole-model scaling and rotation. Named feature parameters require a designer-defined schema.",
+        "complexity_reason": "Native Inventor model parameters are linked to the Inventor feature history; OCCT displays the rebuilt STEP." if is_native_inventor else "Named hammer parameters are linked to a rebuild recipe." if is_parametric else "NIST FTC-06 schema maps overall dimensions to a named OCCT affine rebuild; AP242 PMI remains source-only until feature recipes are available." if is_nist_ftc_06 else "Simple geometry supports free-form editing." if is_simple else "Complex geometry supports whole-model scaling and rotation. Named feature parameters require a designer-defined schema.",
         "units": unit_info,
         "length": values["length"],
         "breadth": values["breadth"],
         "height": values["height"],
         "angle": values["angle"],
         "parameters": parameters,
-        "parameter_schema": HAMMER_SCHEMA if is_parametric else None,
+        "parameter_schema": document.native_parameters if is_native_inventor else HAMMER_SCHEMA if is_parametric else NIST_FTC_06_SCHEMA if is_nist_ftc_06 else None,
+        "native_runtime": "autodesk_inventor" if is_native_inventor else None,
         "profile": document.profile,
         "detected_features": detected_features,
         "pmi_dimensions": pmi_dimensions,
@@ -247,8 +312,8 @@ def _analysis_payload(document: StoredDocument, shape=None) -> dict:
         "mesh": analysis.mesh,
         "constraints": {
             "valid": True,
-            "message": "L3 = L1 - L2; L1 must be greater than L2." if is_parametric else "Free-form mode: dimensions and Z rotation may change independently.",
-            "rules": HAMMER_CONSTRAINTS if is_parametric else [],
+            "message": "Native Inventor parameters rebuild the feature history." if is_native_inventor else "L3 = L1 - L2; L1 must be greater than L2." if is_parametric else "NIST FTC-06 schema: overall dimensions use the OCCT affine rebuild; AP242 PMI remains read-only." if is_nist_ftc_06 else "Free-form mode: dimensions and Z rotation may change independently.",
+            "rules": HAMMER_CONSTRAINTS if is_parametric else NIST_FTC_06_CONSTRAINTS if is_nist_ftc_06 else [],
         },
     }
 
@@ -262,7 +327,7 @@ def _get_document(document_id: str) -> StoredDocument:
 
 @app.get("/api/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "engine": "occt", "formats": "STEP, IGES"}
+    return {"status": "ok", "engine": "occt+inventor", "formats": "STEP, IGES, Inventor IPT, Inventor IAM"}
 
 
 @app.post("/api/documents")
@@ -274,13 +339,30 @@ async def upload_document(file: UploadFile = File(...)) -> dict:
         raise HTTPException(status_code=400, detail="The uploaded CAD file is empty.")
     if len(data) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="3D CAD files are limited to 50 MB in this PoC.")
-    try:
-        shape = load_shape(data, source_format)
-    except Exception as exc:  # noqa: BLE001 - return parser details to the client
-        raise HTTPException(status_code=400, detail=f"Could not read the {source_format.upper()} model: {exc}") from exc
     if len(DOCUMENTS) >= MAX_DOCUMENTS:
         DOCUMENTS.pop(next(iter(DOCUMENTS)))
     document_id = uuid4().hex
+    native_source_path: Path | None = None
+    native_parameters: list[dict] | None = None
+    geometry_format = source_format
+    working_bytes = data
+    if source_format == "inventor":
+        native_source_path = NATIVE_WORK_ROOT / f"{document_id}{Path(filename).suffix.lower()}"
+        native_step_path = NATIVE_WORK_ROOT / f"{document_id}.step"
+        NATIVE_WORK_ROOT.mkdir(parents=True, exist_ok=True)
+        native_source_path.write_bytes(data)
+        try:
+            worker = get_inventor_worker()
+            native_parameters = [parameter.to_dict() for parameter in worker.rebuild_to_step(native_source_path, native_step_path, {})]
+            working_bytes = native_step_path.read_bytes()
+            geometry_format = "step"
+        except InventorAdapterError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    try:
+        shape = load_shape(working_bytes, geometry_format)
+        analysis = _analyze_preview_shape(shape)
+    except Exception as exc:  # noqa: BLE001 - return parser details to the client
+        raise HTTPException(status_code=400, detail=f"Could not read the {source_format.upper()} model: {exc}") from exc
     profile = _profile_for_filename(filename)
     profile_state = None
     if profile == "parametric_hammer":
@@ -292,21 +374,85 @@ async def upload_document(file: UploadFile = File(...)) -> dict:
         document_id,
         filename,
         data,
-        data,
+        working_bytes,
         source_format,
-        _initial_parameters(shape),
-        extract_pmi(data, source_format),
-        detect_model_units(data, source_format),
+        geometry_format,
+        _initial_parameters(shape, analysis),
+        extract_pmi(data, source_format) if source_format != "inventor" else [],
+        detect_model_units(data, source_format) if source_format != "inventor" else detect_model_units(working_bytes, geometry_format),
         profile,
         profile_state,
+        native_source_path,
+        native_parameters,
+        shape,
+        analysis,
+        shape,
+        analysis,
     )
     DOCUMENTS[document_id] = document
-    return _analysis_payload(document, shape)
+    return _analysis_payload(document, shape, analysis)
 
 
 @app.post("/api/documents/{document_id}/parameters")
 def apply_parameters(document_id: str, request: ParameterRequest) -> dict:
     document = _get_document(document_id)
+    if document.source_format == "inventor":
+        if document.native_source_path is None or not document.native_source_path.is_file():
+            raise HTTPException(status_code=409, detail="The native Inventor working source is no longer available.")
+        if request.values is None:
+            raise HTTPException(status_code=400, detail="Native Inventor edits must use a values object.")
+        native_catalog = {parameter["name"]: parameter for parameter in (document.native_parameters or [])}
+        unknown = sorted(set(request.values) - set(native_catalog))
+        if unknown:
+            raise HTTPException(status_code=400, detail=f"Unknown Inventor parameters: {', '.join(unknown)}")
+        updates: dict[str, float] = {}
+        for key, value in request.values.items():
+            if not native_catalog[key]["editable"]:
+                raise HTTPException(status_code=400, detail=f"Inventor parameter {key} is formula-driven and read-only.")
+            numeric_value = float(value)
+            if not isfinite(numeric_value):
+                raise HTTPException(status_code=400, detail=f"Parameter {key} must be a finite number.")
+            updates[key] = numeric_value
+        native_step_path = NATIVE_WORK_ROOT / f"{document.document_id}_edited.step"
+        try:
+            worker = get_inventor_worker()
+            updated_catalog = [parameter.to_dict() for parameter in worker.rebuild_to_step(document.native_source_path, native_step_path, updates)]
+            candidate_bytes = native_step_path.read_bytes()
+            candidate_shape = load_shape(candidate_bytes, "step")
+            candidate_analysis = _analyze_preview_shape(candidate_shape)
+            if (
+                candidate_analysis.solid_count <= 0
+                or candidate_analysis.mesh["triangle_count"] <= 0
+                or not candidate_analysis.mesh["vertices"]
+            ):
+                worker.discard_session()
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "Inventor rebuilt the part, but the exported STEP contains no valid solid. "
+                        "The previous preview was preserved. Try a smaller value or use Reset to production."
+                    ),
+                )
+            document.working_bytes = candidate_bytes
+            document.shape = candidate_shape
+            document.analysis = candidate_analysis
+            document.native_parameters = updated_catalog
+            shape = candidate_shape
+            document.parameter_state = _initial_parameters(shape, candidate_analysis)
+            return _analysis_payload(document, shape, candidate_analysis)
+        except InventorAdapterError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:  # noqa: BLE001 - normalize native/OCCT candidate failures
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "Inventor rebuilt the part, but OCCT could not create a valid preview. "
+                    "The previous preview was preserved. Try a smaller value or use Reset to production."
+                ),
+            ) from exc
+
     if document.profile == "parametric_hammer":
         if request.values is None:
             raise HTTPException(status_code=400, detail="Parametric hammer edits must use a values object.")
@@ -331,10 +477,13 @@ def apply_parameters(document_id: str, request: ParameterRequest) -> dict:
             working_bytes = export_shape(updated, document.source_format)
         except Exception as exc:  # noqa: BLE001 - CAD kernel errors are client-edit errors
             raise HTTPException(status_code=400, detail=f"Could not rebuild the parametric hammer: {exc}") from exc
+        updated_analysis = _analyze_preview_shape(updated)
         document.working_bytes = working_bytes
+        document.shape = updated
+        document.analysis = updated_analysis
         document.profile_state = target
-        document.parameter_state = _initial_parameters(updated)
-        return _analysis_payload(document, updated)
+        document.parameter_state = _initial_parameters(updated, updated_analysis)
+        return _analysis_payload(document, updated, updated_analysis)
 
     shape = _load_document_shape(document)
     if request.length is None or request.breadth is None or request.height is None:
@@ -346,42 +495,75 @@ def apply_parameters(document_id: str, request: ParameterRequest) -> dict:
         "angle": round(float(request.angle), 6),
     }
     try:
-        updated = apply_freeform_parameters(shape, document.parameter_state, target)
+        updated = apply_freeform_parameters(shape, document.parameter_state, target, document.analysis)
         working_bytes = export_shape(updated, document.source_format)
     except Exception as exc:  # noqa: BLE001 - CAD kernel errors are client-edit errors
         raise HTTPException(status_code=400, detail=f"Could not update the CAD model: {exc}") from exc
+    updated_analysis = _analyze_preview_shape(updated)
     document.working_bytes = working_bytes
+    document.shape = updated
+    document.analysis = updated_analysis
     document.parameter_state = target
-    return _analysis_payload(document, updated)
+    return _analysis_payload(document, updated, updated_analysis)
 
 
 @app.post("/api/documents/{document_id}/reset")
 def reset_document(document_id: str) -> dict:
     document = _get_document(document_id)
+    if document.source_format == "inventor":
+        if document.native_source_path is None:
+            raise HTTPException(status_code=409, detail="The native Inventor working source is no longer available.")
+        native_step_path = NATIVE_WORK_ROOT / f"{document.document_id}_reset.step"
+        try:
+            worker = get_inventor_worker()
+            document.native_parameters = [parameter.to_dict() for parameter in worker.rebuild_to_step(document.native_source_path, native_step_path, {})]
+            document.working_bytes = native_step_path.read_bytes()
+            shape = load_shape(document.working_bytes, "step")
+            analysis = _analyze_preview_shape(shape)
+            document.shape = shape
+            document.analysis = analysis
+            document.parameter_state = _initial_parameters(shape, analysis)
+            return _analysis_payload(document, shape, analysis)
+        except InventorAdapterError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
     document.working_bytes = document.original_bytes
-    shape = _load_document_shape(document)
-    document.parameter_state = _initial_parameters(shape)
+    shape = document.original_shape or load_shape(document.working_bytes, document.geometry_format)
+    analysis = document.original_analysis or _analyze_preview_shape(shape)
+    document.shape = shape
+    document.analysis = analysis
+    document.parameter_state = _initial_parameters(shape, analysis)
     if document.profile == "parametric_hammer":
         document.profile_state = dict(HAMMER_DEFAULTS)
-    return _analysis_payload(document, shape)
+    return _analysis_payload(document, shape, analysis)
 
 
 @app.get("/api/documents/{document_id}/download")
 def download_document(document_id: str, format: str | None = Query(default=None)) -> Response:
     document = _get_document(document_id)
-    requested_format = document.source_format if format is None else format.lower().lstrip(".")
+    native_format = Path(document.filename).suffix.lower().lstrip(".") if document.source_format == "inventor" else None
+    requested_format = ("step" if document.source_format == "inventor" else document.source_format) if format is None else format.lower().lstrip(".")
     if requested_format in {"stp", "step"}:
         requested_format = "step"
     elif requested_format in {"igs", "iges"}:
         requested_format = "iges"
+    elif requested_format in {"ipt", "iam", "inventor"}:
+        requested_format = native_format if requested_format == "inventor" else requested_format
     else:
-        raise HTTPException(status_code=400, detail="Export format must be STEP or IGES.")
+        raise HTTPException(status_code=400, detail="Export format must be STEP, IGES, or IPT.")
     try:
-        output_bytes = document.working_bytes if requested_format == document.source_format else export_shape(_load_document_shape(document), requested_format)
+        if requested_format in {"ipt", "iam"}:
+            if document.source_format != "inventor" or document.native_source_path is None:
+                raise ValueError("Native Inventor export is available only for native Inventor models.")
+            if requested_format != native_format:
+                raise ValueError(f"This model is a native .{native_format} file; it cannot be exported as .{requested_format}.")
+            native_path = NATIVE_WORK_ROOT / f"{document.document_id}_edited.{native_format}"
+            output_bytes = get_inventor_worker().export_to_native(document.native_source_path, native_path)
+        else:
+            output_bytes = document.working_bytes if requested_format == document.geometry_format else export_shape(_load_document_shape(document), requested_format)
     except Exception as exc:  # noqa: BLE001 - return export details to the client
         raise HTTPException(status_code=400, detail=f"Could not export the model as {requested_format.upper()}: {exc}") from exc
-    media_type = "application/step" if requested_format == "step" else "application/iges"
-    extension = "step" if requested_format == "step" else "iges"
+    media_type = {"step": "application/step", "iges": "application/iges", "ipt": "application/x-inventor", "iam": "application/x-inventor"}[requested_format]
+    extension = requested_format
     if document.profile == "parametric_hammer":
         _remember_parameter_metadata(hashlib.sha256(output_bytes).hexdigest(), document.profile_state or HAMMER_DEFAULTS)
     export_stem = re.sub(r"(?:_edited)+$", "", Path(document.filename).stem, flags=re.IGNORECASE)

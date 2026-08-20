@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
-const ACCEPTED_EXTENSIONS = ["step", "stp", "iges", "igs"];
+const ACCEPTED_EXTENSIONS = ["step", "stp", "iges", "igs", "ipt", "iam"];
 
 function formatNumber(value, digits = 2) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
@@ -136,7 +136,7 @@ function StatCard({ icon: Icon, label, value, detail }) {
   return <div className="stat-card"><div className="stat-icon"><Icon size={16} /></div><div><span className="stat-label">{label}</span><strong>{value}</strong><small>{detail}</small></div></div>;
 }
 
-function ExportModal({ documentId, sourceFormat, onClose }) {
+function ExportModal({ documentId, sourceFormat, nativeFormat, onClose }) {
   function downloadAs(format) {
     window.location.href = `${API_BASE}/api/documents/${documentId}/download?format=${format}`;
     onClose();
@@ -146,7 +146,7 @@ function ExportModal({ documentId, sourceFormat, onClose }) {
     <div className="export-modal" role="dialog" aria-modal="true" aria-labelledby="export-title">
       <div className="modal-heading"><div><div className="section-eyebrow">Download edited model</div><h2 id="export-title">Choose export format</h2></div><button className="modal-close" onClick={onClose} aria-label="Close export dialog"><X size={17} /></button></div>
       <p>The current edited geometry will be downloaded in the selected CAD format.</p>
-      <div className="export-options"><button onClick={() => downloadAs("step")}><strong>STEP</strong><span>Neutral solid exchange format</span><em>{sourceFormat === "step" ? "Original format" : "Convert from IGES"}</em></button><button onClick={() => downloadAs("iges")}><strong>IGES</strong><span>Surface and legacy CAD exchange format</span><em>{sourceFormat === "iges" ? "Original format" : "Convert from STEP"}</em></button><button className="export-disabled" disabled><strong>TBD</strong><span>Additional CAD formats</span><em>Coming later</em></button></div>
+      <div className="export-options">{sourceFormat === "inventor" && <button onClick={() => downloadAs(nativeFormat)}><strong>{nativeFormat?.toUpperCase()}</strong><span>Native Autodesk Inventor {nativeFormat === "iam" ? "assembly" : "part"}</span><em>Preserves the Inventor feature history and parameters</em></button>}<button onClick={() => downloadAs("step")}><strong>STEP</strong><span>Neutral solid exchange format</span><em>{sourceFormat === "step" ? "Original format" : "Convert from Inventor or IGES"}</em></button><button onClick={() => downloadAs("iges")}><strong>IGES</strong><span>Surface and legacy CAD exchange format</span><em>{sourceFormat === "iges" ? "Original format" : "Convert from Inventor or STEP"}</em></button><button className="export-disabled" disabled><strong>TBD</strong><span>Additional CAD formats</span><em>Coming later</em></button></div>
       <button className="button subtle full modal-cancel" onClick={onClose}>Cancel</button>
     </div>
   </div>;
@@ -157,6 +157,8 @@ function ParameterPanel({ analysis, parameterValues, isBusy, onSubmit, onChange,
   const parameters = analysis?.parameters ?? [];
   const isComplex = analysis?.complexity === "complex";
   const isParametric = analysis?.mode === "parametric";
+  const isNativeInventor = analysis?.mode === "native_parametric";
+  const isSchemaProfile = analysis?.mode === "schema";
   const unitLabel = (parameter) => parameter.unit === "deg" ? "deg" : parameter.unit ?? analysis?.units?.symbol ?? "u";
   const hasEditableValues = parameters.filter((parameter) => parameter.editable).every((parameter) => {
     const value = Number(parameterValues[parameter.key]);
@@ -164,13 +166,13 @@ function ParameterPanel({ analysis, parameterValues, isBusy, onSubmit, onChange,
   });
 
   return <section className="side-section">
-    <div className="section-heading"><div className="section-eyebrow">{isParametric ? "Parametric hammer dimensions" : editingAvailable ? isComplex ? "Editable overall dimensions" : "Editable parameters" : "Detected measurements"}</div><Ruler size={15} /></div>
+    <div className="section-heading"><div className="section-eyebrow">{isNativeInventor ? "Native Inventor parameters" : isParametric ? "Parametric hammer dimensions" : editingAvailable ? isComplex ? "Editable overall dimensions" : "Editable parameters" : "Detected measurements"}</div><Ruler size={15} /></div>
     {editingAvailable ? <form onSubmit={onSubmit} className="parameter-form">
       {parameters.map((parameter) => <div key={parameter.key}>
         <label htmlFor={`parameter-${parameter.key}`}>{parameter.label}<span>{parameter.unit}</span></label>
-        <div className="input-wrap"><input id={`parameter-${parameter.key}`} type="number" min={parameter.key === "angle" ? undefined : "0.000001"} step="any" value={parameterValues[parameter.key] ?? ""} onChange={(event) => onChange(parameter.key, event.target.value)} disabled={isBusy} readOnly={!parameter.editable} placeholder="Upload a model" /><span>{unitLabel(parameter)}</span></div>
+        <div className="input-wrap"><input id={`parameter-${parameter.key}`} type="number" min={isNativeInventor || parameter.key === "angle" ? undefined : "0.000001"} step="any" value={parameterValues[parameter.key] ?? ""} onChange={(event) => onChange(parameter.key, event.target.value)} disabled={isBusy} readOnly={!parameter.editable} placeholder="Upload a model" /><span>{unitLabel(parameter)}</span></div>
       </div>)}
-      <p>{isParametric ? "L3 is calculated as L1 - L2. L1 must be greater than L2; the original master file remains unchanged." : isComplex ? "These controls scale and rotate the complete imported model. Named feature parameters require a designer-defined schema. The original uploaded file remains unchanged." : "These controls are generated for this simple model. The original uploaded file remains unchanged."}</p>
+      <p>{isNativeInventor ? "These values are read from the native Inventor parameter table. Changes rebuild the Inventor feature history, export a new STEP, and refresh the OCCT preview; the original .ipt remains unchanged." : isParametric ? "L3 is calculated as L1 - L2. L1 must be greater than L2; the original master file remains unchanged." : isSchemaProfile ? "These schema-driven controls use the named OCCT affine rebuild recipe for this model. AP242 PMI values remain source-only until feature mappings are defined." : isComplex ? "These controls scale and rotate the complete imported model. Named feature parameters require a designer-defined schema. The original uploaded file remains unchanged." : "These controls are generated for this simple model. The original uploaded file remains unchanged."}</p>
       <button className="button primary full" type="submit" disabled={!analysis || isBusy || !hasEditableValues}><Check size={16} /> {isBusy ? "Rebuilding model..." : "Update 3D model"}</button>
     </form> : analysis ? <div className="measurement-panel">
       <div className="complex-badge">Complex model · measurement only</div>
@@ -248,13 +250,13 @@ function App() {
     if (!file) return;
     const extension = file.name.toLowerCase().split(".").pop();
     if (!ACCEPTED_EXTENSIONS.includes(extension)) {
-      setError(`${file.name} is not supported. Please use STEP or IGES.`);
+      setError(`${file.name} is not supported. Please use STEP, IGES, or an Inventor .ipt/.iam file.`);
       setNotice("");
       return;
     }
     setIsBusy(true);
     setError("");
-    setNotice("");
+    setNotice(["ipt", "iam"].includes(extension) ? "Opening native Inventor model and generating OCCT preview… this may take up to a minute" : "Importing model…");
     try {
       const form = new FormData();
       form.append("file", file);
@@ -263,7 +265,7 @@ function App() {
       setAnalysis(payload);
       syncParameters(payload);
       setFileMeta({ name: file.name, size: file.size });
-      setNotice(`${payload.source_format.toUpperCase()} model loaded through OCCT`);
+      setNotice(payload.source_format === "inventor" ? "Inventor model loaded through Inventor + OCCT" : `${payload.source_format.toUpperCase()} model loaded through OCCT`);
     } catch (uploadError) {
       setError(uploadError.message);
     } finally {
@@ -297,7 +299,7 @@ function App() {
       const payload = await readResponse(await fetch(`${API_BASE}/api/documents/${documentId}/parameters`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(analysis.mode === "parametric"
+        body: JSON.stringify(["parametric", "native_parametric"].includes(analysis.mode)
           ? { values: Object.fromEntries(analysis.parameters.filter((parameter) => parameter.editable).map((parameter) => [parameter.key, Number(parameterValues[parameter.key])])) }
           : {
             length: Number(parameterValues.length),
@@ -352,11 +354,11 @@ function App() {
       <aside className="sidebar">
         <section className="side-section project-section">
           <div className="section-eyebrow">Project</div>
-          <input ref={inputRef} type="file" accept=".step,.stp,.iges,.igs" onChange={(event) => uploadFile(event.target.files?.[0])} hidden />
-          <button className={`dropzone ${analysis ? "has-file" : ""} ${isDragging ? "is-dragging" : ""}`} onClick={() => inputRef.current?.click()} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} aria-label="Upload or drop a STEP or IGES file">
-            <div className="upload-icon"><Upload size={18} /></div><strong>{isDragging ? "Release to upload" : analysis ? "Replace model" : "Upload a 3D model"}</strong><span>{analysis ? fileMeta?.name : "Drag a STEP or IGES file here"}</span>
+          <input ref={inputRef} type="file" accept=".step,.stp,.iges,.igs,.ipt,.iam" onChange={(event) => uploadFile(event.target.files?.[0])} hidden />
+          <button className={`dropzone ${analysis ? "has-file" : ""} ${isDragging ? "is-dragging" : ""}`} onClick={() => inputRef.current?.click()} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop} aria-label="Upload or drop a STEP, IGES, or Inventor IPT file">
+            <div className="upload-icon"><Upload size={18} /></div><strong>{isDragging ? "Release to upload" : analysis ? "Replace model" : "Upload a 3D model"}</strong><span>{analysis ? fileMeta?.name : "Drag a STEP, IGES, .ipt, or .iam file here"}</span>
           </button>
-          {fileMeta && <div className="file-chip"><div className="file-chip-icon">{fileMeta.name.toLowerCase().endsWith(".iges") || fileMeta.name.toLowerCase().endsWith(".igs") ? "IGES" : "STEP"}</div><div><strong>{fileMeta.name}</strong><span>{formatBytes(fileMeta.size)} · OCCT</span></div><button aria-label="Remove model" onClick={clearDocument}><X size={14} /></button></div>}
+          {fileMeta && <div className="file-chip"><div className="file-chip-icon">{["ipt", "iam"].includes(fileMeta.name.toLowerCase().split(".").pop()) ? fileMeta.name.toLowerCase().split(".").pop().toUpperCase() : fileMeta.name.toLowerCase().endsWith(".iges") || fileMeta.name.toLowerCase().endsWith(".igs") ? "IGES" : "STEP"}</div><div><strong>{fileMeta.name}</strong><span>{formatBytes(fileMeta.size)} · {["ipt", "iam"].includes(fileMeta.name.toLowerCase().split(".").pop()) ? "Inventor + OCCT" : "OCCT"}</span></div><button aria-label="Remove model" onClick={clearDocument}><X size={14} /></button></div>}
         </section>
 
         <ParameterPanel analysis={analysis} parameterValues={parameterValues} isBusy={isBusy} onSubmit={applyParameters} onChange={(key, value) => setParameterValues((current) => ({ ...current, [key]: value }))} onReset={resetDocument} />
@@ -375,7 +377,7 @@ function App() {
 
         <section className="side-section">
           <div className="section-heading"><div className="section-eyebrow">Editing mode</div><Layers3 size={15} /></div>
-          <div className="mode-card"><strong>{analysis?.mode === "parametric" ? "Parametric" : analysis?.editing_available ? "Free-form" : analysis ? "Measurement-only" : "Waiting for model"}</strong><span>{analysis?.complexity_reason ?? "The available controls will be based on the uploaded model."}</span><em>{analysis?.mode === "parametric" ? "Constraints active: L3 = L1 - L2" : analysis?.editing_available ? analysis.complexity === "complex" ? "Whole-model editing is active; named feature schemas are the next layer" : "Named parametric schemas are the next layer" : analysis ? "Configure named parameters for this model to enable editing" : "Upload STEP or IGES to begin"}</em></div>
+          <div className="mode-card"><strong>{analysis?.mode === "native_parametric" ? "Native Inventor" : analysis?.mode === "parametric" ? "Parametric" : analysis?.editing_available ? "Free-form" : analysis ? "Measurement-only" : "Waiting for model"}</strong><span>{analysis?.complexity_reason ?? "The available controls will be based on the uploaded model."}</span><em>{analysis?.mode === "native_parametric" ? "Inventor feature rebuild active; OCCT preview enabled" : analysis?.mode === "parametric" ? "Constraints active: L3 = L1 - L2" : analysis?.editing_available ? analysis.complexity === "complex" ? "Whole-model editing is active; named feature schemas are the next layer" : "Named parametric schemas are the next layer" : analysis ? "Configure named parameters for this model to enable editing" : "Upload STEP or IGES to begin"}</em></div>
         </section>
         <div className="sidebar-footer"><span>Open-source 3D PoC</span><span>v0.2.0</span></div>
       </aside>
@@ -389,7 +391,7 @@ function App() {
 
         <div className="lower-grid"><section className="data-card"><div className="card-toolbar"><div><strong>Model measurements</strong><span>Values extracted from the OCCT model · {analysis?.units?.name ?? "unit not declared"}</span></div></div>{analysis ? <div className="dimension-list">{analysis.parameters.map((parameter) => <div key={parameter.key}><span>{parameter.label}</span><strong>{formatNumber(parameter.value, 6)} <small>{parameter.unit === "deg" ? "deg" : parameter.unit}</small></strong><em className={parameter.editable ? "editable-tag" : "detected-tag"}>{parameter.editable ? "Editable" : "Detected"}</em></div>)}<div><span>Edges / vertices</span><strong>{formatNumber(analysis.edge_count, 0)} / {formatNumber(analysis.vertex_count, 0)}</strong><em className="detected-tag">Detected</em></div></div> : <div className="card-empty">Measurements will populate after upload.</div>}</section><section className="data-card"><div className="card-toolbar"><div><strong>Engine status</strong><span>Current 3D PoC boundaries</span></div></div><div className="engine-notes"><div><Check size={15} /><span>STEP and IGES imported with OCCT</span></div><div><Check size={15} /><span>Original production file is immutable</span></div><div><Check size={15} /><span>Edited geometry exports back to source format</span></div><div><Check size={15} /><span>{analysis?.valid ? "Shape validation passed" : "Upload a model to validate"}</span></div></div></section></div>
       </section>
-      {isExportOpen && <ExportModal documentId={documentId} sourceFormat={analysis?.source_format} onClose={() => setIsExportOpen(false)} />}
+      {isExportOpen && <ExportModal documentId={documentId} sourceFormat={analysis?.source_format} nativeFormat={analysis?.native_format} onClose={() => setIsExportOpen(false)} />}
     </main>
   </div>;
 }

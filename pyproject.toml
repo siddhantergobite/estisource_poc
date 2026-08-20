@@ -12,6 +12,7 @@ dependencies = [
     "cadquery-ocp>=7.9.3.1.1",
     "fastapi>=0.115",
     "python-multipart>=0.0.20",
+    "pywin32>=312",
     "uvicorn[standard]>=0.34",
 ]
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from contextlib import contextmanager
 from dataclasses import dataclass
 from math import cos, radians, sin
@@ -116,11 +117,82 @@ def _shape_from_file(path: Path, source_format: str):
         raise ValueError(f"Could not read the {source_format.upper()} file.")
     transferred = reader.TransferRoots()
     if transferred <= 0:
+        primitive_shape = _read_step_primitive_exchange(path) if source_format in {"step", "stp"} else None
+        if primitive_shape is not None:
+            return primitive_shape
         raise ValueError(f"The {source_format.upper()} file contains no transferable geometry.")
     shape = reader.OneShape()
     if shape.IsNull():
         raise ValueError(f"The {source_format.upper()} file produced an empty model.")
     return shape
+
+
+def _read_step_primitive_exchange(path: Path):
+    """Recover simple BLOCK/CYLINDER STEP exchange fixtures.
+
+    Some lightweight STEP producers write constructive primitive entities
+    directly into a shape representation instead of exporting a standard
+    B-Rep. OCCT's STEPControl reader does not transfer those entities, so
+    support the small, well-defined subset used by these files as a fallback.
+    Normal STEP B-Rep files never use this path.
+    """
+
+    try:
+        text = path.read_text(encoding="latin-1")
+    except OSError:
+        return None
+
+    number = r"[-+]?\d+(?:\.\d*)?(?:[Ee][-+]?\d+)?"
+    points = {
+        int(identifier): tuple(float(value) for value in values.split(","))
+        for identifier, values in re.findall(
+            rf"#(\d+)\s*=\s*CARTESIAN_POINT\('',\s*\(({number}\s*,\s*{number}\s*,\s*{number})\)\)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    }
+    placements = {
+        int(identifier): int(point_id)
+        for identifier, point_id in re.findall(
+            r"#(\d+)\s*=\s*AXIS2_PLACEMENT_3D\('',\s*#(\d+)\s*,\s*#\d+\s*,\s*#\d+\)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    }
+
+    shapes = []
+    for placement_id, width, depth, height in re.findall(
+        rf"#\d+\s*=\s*BLOCK\('[^']*',\s*#(\d+),\s*({number}),\s*({number}),\s*({number})\)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        point = points.get(placements.get(int(placement_id), -1))
+        if point is not None:
+            shapes.append(BRepPrimAPI_MakeBox(gp_Pnt(*point), float(width), float(depth), float(height)).Shape())
+
+    for placement_id, radius, height in re.findall(
+        rf"#\d+\s*=\s*RIGHT_CIRCULAR_CYLINDER\('[^']*',\s*#(\d+),\s*({number}),\s*({number})\)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        point = points.get(placements.get(int(placement_id), -1))
+        if point is not None:
+            shapes.append(
+                BRepPrimAPI_MakeCylinder(
+                    gp_Ax2(gp_Pnt(*point), gp_Dir(0, 0, 1)),
+                    float(radius),
+                    float(height),
+                ).Shape()
+            )
+
+    if not shapes:
+        return None
+    compound = TopoDS_Compound()
+    builder = BRep_Builder()
+    builder.MakeCompound(compound)
+    for shape in shapes:
+        builder.Add(compound, shape)
+    return compound
 
 
 def load_shape(data: bytes, source_format: str):
@@ -330,16 +402,25 @@ def _mesh_shape(shape, deflection: float = 0.8, max_triangles: int = 120_000) ->
         if triangulation is not None:
             transformation = location.Transformation()
             reversed_face = face.Orientation() == TopAbs_REVERSED
+            # Reuse nodes across triangles in the same CAD face. Do not share
+            # nodes between faces: that preserves sharp B-Rep edge normals in
+            # the browser while still removing most of the duplicate payload.
+            node_indices: dict[int, int] = {}
             for triangle_index in range(1, triangulation.NbTriangles() + 1):
                 if triangle_count >= max_triangles:
                     break
                 n1, n2, n3 = triangulation.Triangle(triangle_index).Get()
                 node_ids = (n1, n3, n2) if reversed_face else (n1, n2, n3)
-                start_index = len(vertices) // 3
+                triangle_indices = []
                 for node_id in node_ids:
-                    point = triangulation.Node(node_id).Transformed(transformation)
-                    vertices.extend((point.X(), point.Y(), point.Z()))
-                indices.extend((start_index, start_index + 1, start_index + 2))
+                    vertex_index = node_indices.get(node_id)
+                    if vertex_index is None:
+                        point = triangulation.Node(node_id).Transformed(transformation)
+                        vertex_index = len(vertices) // 3
+                        node_indices[node_id] = vertex_index
+                        vertices.extend((point.X(), point.Y(), point.Z()))
+                    triangle_indices.append(vertex_index)
+                indices.extend(triangle_indices)
                 triangle_count += 1
         explorer.Next()
     return {"vertices": vertices, "indices": indices, "triangle_count": triangle_count}
@@ -409,7 +490,12 @@ def detect_geometry_features(shape) -> list[dict]:
     return features
 
 
-def apply_freeform_parameters(shape, current: dict[str, float], target: dict[str, float]):
+def apply_freeform_parameters(
+    shape,
+    current: dict[str, float],
+    target: dict[str, float],
+    current_analysis: Cad3DAnalysis | None = None,
+):
     """Scale a shape to target dimensions and rotate it around its Z axis.
 
     This is the generic/free-form mode. Model-specific feature constraints will
@@ -443,7 +529,10 @@ def apply_freeform_parameters(shape, current: dict[str, float], target: dict[str
         0.0,
         sz,
     )
-    analysis = analyze_shape(shape, include_mesh=False)
+    # The API keeps the current analysis in the document session. Reusing it
+    # avoids a second topology walk on every parameter save just to find the
+    # center of the model.
+    analysis = current_analysis or analyze_shape(shape, include_mesh=False)
     center_x = (analysis.min_x + analysis.max_x) / 2
     center_y = (analysis.min_y + analysis.max_y) / 2
     center_z = (analysis.min_z + analysis.max_z) / 2
