@@ -203,6 +203,30 @@ def _analyze_preview_shape(shape) -> Cad3DAnalysis:
     return analyze_shape(BRepBuilderAPI_Copy(shape).Shape())
 
 
+def _preview_geometry_fingerprint(analysis: Cad3DAnalysis | None) -> str | None:
+    """Create a stable fingerprint for the currently displayed preview.
+
+    Native Inventor can accept a parameter expression that is valid but is not
+    connected to the visible solid (for example, an unused construction
+    parameter). Comparing only the parameter table would incorrectly report
+    such an edit as a successful model update. The preview mesh is already
+    produced for the native workflow, so hashing its topology, bounds, and
+    coordinates gives us a cheap, deterministic no-op check.
+    """
+
+    if analysis is None or not analysis.mesh.get("vertices"):
+        return None
+    payload = {
+        "topology": [analysis.solid_count, analysis.face_count, analysis.edge_count, analysis.vertex_count],
+        "bounds": [analysis.min_x, analysis.min_y, analysis.min_z, analysis.max_x, analysis.max_y, analysis.max_z],
+        "triangles": analysis.mesh.get("triangle_count", 0),
+        "vertices": analysis.mesh.get("vertices", []),
+        "indices": analysis.mesh.get("indices", []),
+    }
+    encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def _is_simple_model(analysis) -> bool:
     """Permit generic scaling only for small, single-part geometry."""
 
@@ -459,6 +483,11 @@ def apply_parameters(document_id: str, request: ParameterRequest) -> dict:
             if not isfinite(numeric_value):
                 raise HTTPException(status_code=400, detail=f"Parameter {key} must be a finite number.")
             updates[key] = numeric_value
+        changed_parameter_names = [
+            key
+            for key, value in updates.items()
+            if key in native_catalog and abs(float(value) - float(native_catalog[key]["display_value"])) > 1e-9
+        ]
         native_step_path = NATIVE_WORK_ROOT / f"{document.document_id}_edited.step"
         try:
             worker = get_inventor_worker()
@@ -478,6 +507,21 @@ def apply_parameters(document_id: str, request: ParameterRequest) -> dict:
                     detail=(
                         "Inventor rebuilt the part, but the exported STEP contains no previewable geometry. "
                         "The previous preview was preserved. Try a smaller value or use Reset to production."
+                    ),
+                )
+            previous_fingerprint = _preview_geometry_fingerprint(document.analysis)
+            candidate_fingerprint = _preview_geometry_fingerprint(candidate_analysis)
+            if changed_parameter_names and previous_fingerprint and previous_fingerprint == candidate_fingerprint:
+                worker.discard_session()
+                labels = ", ".join(
+                    native_catalog[name].get("label") or name
+                    for name in changed_parameter_names
+                )
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"Inventor accepted the value, but the preview geometry did not change for {labels}. "
+                        "That parameter is not connected to the visible solid in this model, so the previous preview was preserved."
                     ),
                 )
             document.working_bytes = candidate_bytes
